@@ -6,14 +6,19 @@
 #				<Property Name 1>	<Data type>	<Revit parameter name (if different from property name)>
 #				<Property Name 2>	<Data type>	<Revit parameter name (if different from property name)>
 #				...
-# Data type supported currently are only the primitive types: Text, Real, Integer and Boolean
+# Data types supported: Area, Boolean, ClassificationReference, ColorTemperature, Count, Currency, 
+#	ElectricalCurrent, ElectricalEfficacy, ElectricalVoltage, Force, Frequency, Identifier, 
+#	Illuminance, Integer, Label, Length, Logical, LuminousFlux, LuminousIntensity, 
+#	NormalisedRatio, MassDensity, PlaneAngle, PositiveLength, PositivePlaneAngle, PositiveRatio, 
+#	Power, Pressure, Ratio, Real, Text, ThermalTransmittance, ThermodynamicTemperature, Volume, 
+#	VolumetricFlowRate
 # 
 # PropertySet definition for COBie
 #
 PropertySet:	COBie_Specification	T	IfcElementType
-	NominalLength	Real	COBie.Type.NominalLength
-	NominalWidth	Real	COBie.Type.NominalWidth
-	NominalHeight	Real	COBie.Type.NominalHeight
+	NominalLength	Length	COBie.Type.NominalLength
+	NominalWidth	Length	COBie.Type.NominalWidth
+	NominalHeight	Length	COBie.Type.NominalHeight
 	Shape		Text	COBie.Type.Shape
 	Size		Text	COBie.Type.Size
 	Color		Text	COBie.Type.Color
