@@ -521,7 +521,11 @@ namespace Revit.IFC.Export.Utility
             return "";
 
          if (ExporterCacheManager.ExportOptionsCache.ExportAs2x3COBIE24DesignDeliverable)
-            return GetCOBieDesiredName(element);
+         {
+            string COBieName = GetCOBieDesiredName(element);
+            if (!string.IsNullOrEmpty(COBieName))
+               return COBieName;
+         }
 
          if (ExporterCacheManager.ExportOptionsCache.NamingOptions.UseVisibleRevitNameAsEntityName)
             return GetRevitDisplayName(element);
