@@ -29,85 +29,37 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
    /// <summary>
    /// Represents an IfcDistributionPort.
    /// </summary>
-   public class IFCDistributionPort : IFCPort
+   public static class IFCDistributionPort 
    {
-      private IFCFlowDirection m_FlowDirection = IFCFlowDirection.NotDefined;
-
-      /// <summary>
-      /// The flow direction of this port.
-      /// </summary>
-      public IFCFlowDirection FlowDirection
-      {
-         get { return m_FlowDirection; }
-         protected set { m_FlowDirection = value; }
-      }
-
-      /// <summary>
-      /// Default constructor.
-      /// </summary>
-      protected IFCDistributionPort()
-      {
-
-      }
-
-      protected IFCDistributionPort(IFCAnyHandle ifcDistributionPort)
-      {
-         Process(ifcDistributionPort);
-      }
-
-      /// <summary>
-      /// Processes IfcDistributionPort attributes.
-      /// </summary>
-      /// <param name="ifcDistributionPort">The IfcDistributionPort handle.</param>
-      protected override void Process(IFCAnyHandle ifcDistributionPort)
-      {
-         base.Process(ifcDistributionPort);
-
-         FlowDirection = IFCEnums.GetSafeEnumerationAttribute<IFCFlowDirection>(ifcDistributionPort, "FlowDirection", IFCFlowDirection.NotDefined);
-      }
-
-      /// <summary>
-      /// Creates or populates Revit element params based on the information contained in this class.
-      /// </summary>
-      /// <param name="doc">The document.</param>
-      /// <param name="element">The element.</param>
-      protected override void CreateParametersInternal(Document doc, Element element)
-      {
-         base.CreateParametersInternal(doc, element);
-
-         if (element != null)
-         {
-            IFCPropertySet.AddParameterString(doc, element, "Flow Direction", FlowDirection.ToString(), Id);
-         }
-      }
-
       /// <summary>
       /// Creates or populates Revit elements based on the information contained in this class.
       /// </summary>
       /// <param name="doc">The document.</param>
-      protected override void Create(Document doc)
+      internal static ElementId CreatePort(this IfcDistributionPort distributionPort, CreateElementIfcCache cache, ElementId graphicsStyleId)
       {
-         Transform lcs = (ObjectLocation != null) ? ObjectLocation.TotalTransform : Transform.Identity;
+         Transform lcs = distributionPort.ObjectTransform();
 
          // 2016+ only.
-         Point point = Point.Create(lcs.Origin, GraphicsStyleId);
+         Point point = Point.Create(lcs.Origin, graphicsStyleId);
 
          // 2015+: create cone(s) for the direction of flow.
          CurveLoop rightTrangle = new CurveLoop();
          const double radius = 0.5 / 12.0;
          const double height = 1.5 / 12.0;
 
-         SolidOptions solidOptions = new SolidOptions(ElementId.InvalidElementId, GraphicsStyleId);
+         SolidOptions solidOptions = new SolidOptions(ElementId.InvalidElementId, graphicsStyleId);
 
          Frame coordinateFrame = new Frame(lcs.Origin, lcs.BasisX, lcs.BasisY, lcs.BasisZ);
 
          // The origin is at the base of the cone for everything but source - then it is at the top of the cone.
-         XYZ pt1 = FlowDirection == IFCFlowDirection.Source ? lcs.Origin - height * lcs.BasisZ : lcs.Origin;
+         XYZ pt1 = distributionPort.FlowDirection == IfcFlowDirectionEnum.SOURCE ? lcs.Origin - height * lcs.BasisZ : lcs.Origin;
          XYZ pt2 = pt1 + radius * lcs.BasisX;
          XYZ pt3 = pt1 + height * lcs.BasisZ;
 
@@ -120,7 +72,7 @@ namespace Revit.IFC.Import.Data
          Solid portArrow = GeometryCreationUtilities.CreateRevolvedGeometry(coordinateFrame, curveLoops, 0.0, Math.PI * 2.0, solidOptions);
 
          Solid oppositePortArrow = null;
-         if (FlowDirection == IFCFlowDirection.SourceAndSink)
+         if (distributionPort.FlowDirection == IfcFlowDirectionEnum.SOURCEANDSINK)
          {
             Frame oppositeCoordinateFrame = new Frame(lcs.Origin, -lcs.BasisX, lcs.BasisY, -lcs.BasisZ);
             CurveLoop oppositeRightTrangle = new CurveLoop();
@@ -146,44 +98,14 @@ namespace Revit.IFC.Import.Data
             if (oppositePortArrow != null)
                geomObjs.Add(oppositePortArrow);
 
-            DirectShape directShape = IFCElementUtil.CreateElement(doc, CategoryId, GlobalId, geomObjs, Id);
+            DirectShape directShape = IFCElementUtil.CreateElement(cache, distributionPort.CategoryId(cache), distributionPort.GlobalId, geomObjs, distributionPort.StepId);
             if (directShape != null)
-            {
-               CreatedGeometry = geomObjs;
-               CreatedElementId = directShape.Id;
-            }
+               return directShape.Id;
             else
-               Importer.TheLog.LogCreationError(this, null, false);
+               Importer.TheLog.LogCreationError(distributionPort, null, false);
          }
+         return ElementId.InvalidElementId;
       }
-
-      /// <summary>
-      /// Processes an IfcDistributionPort object.
-      /// </summary>
-      /// <param name="ifcDistributionPort">The IfcDistributionPort handle.</param>
-      /// <returns>The IFCDistributionPort object.</returns>
-      public static IFCDistributionPort ProcessIFCDistributionPort(IFCAnyHandle ifcDistributionPort)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcDistributionPort))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcDistributionPort);
-            return null;
-         }
-
-         try
-         {
-            IFCEntity cachedDistributionPort;
-            if (IFCImportFile.TheFile.EntityMap.TryGetValue(ifcDistributionPort.StepId, out cachedDistributionPort))
-               return (cachedDistributionPort as IFCDistributionPort);
-
-            return new IFCDistributionPort(ifcDistributionPort);
-         }
-         catch (Exception ex)
-         {
-            if (ex.Message != "Don't Import")
-               Importer.TheLog.LogError(ifcDistributionPort.StepId, ex.Message, false);
-            return null;
-         }
-      }
+      
    }
 }

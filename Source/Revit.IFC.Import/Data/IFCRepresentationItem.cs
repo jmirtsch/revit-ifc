@@ -28,38 +28,18 @@ using Revit.IFC.Common.Enums;
 using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
-   public abstract class IFCRepresentationItem : IFCEntity
+   public static class IFCRepresentationItem
    {
-      private IFCStyledItem m_StyledByItem = null;
-
-      private IFCPresentationLayerAssignment m_LayerAssignment = null;
-
-      /// <summary>
-      /// The associated style of the representation item, if any.
-      /// </summary>
-      public IFCStyledItem StyledByItem
-      {
-         get { return m_StyledByItem; }
-         protected set { m_StyledByItem = value; }
-      }
-
-      /// <summary>
-      /// The associated layer assignment of the representation item, if any.
-      /// </summary>
-      public IFCPresentationLayerAssignment LayerAssignment
-      {
-         get { return m_LayerAssignment; }
-         protected set { m_LayerAssignment = value; }
-      }
-
       /// <summary>
       /// Returns the associated material id, if any.
       /// </summary>
       /// <param name="scope">The containing creation scope.</param>
       /// <returns>The element id of the material, if any.</returns>
-      public virtual ElementId GetMaterialElementId(IFCImportShapeEditScope scope)
+      public static ElementId GetMaterialElementId(this IfcRepresentationItem representationItem, CreateElementIfcCache cache, IFCImportShapeEditScope scope)
       {
          ElementId materialId = scope.GetCurrentMaterialId();
          if (materialId != ElementId.InvalidElementId)
@@ -67,70 +47,25 @@ namespace Revit.IFC.Import.Data
 
          if (scope.Creator != null)
          {
-            IFCMaterial creatorMaterial = scope.Creator.GetTheMaterial();
-            if (creatorMaterial != null)
-               return creatorMaterial.GetMaterialElementId();
+            IfcMaterial creatorMaterial = scope.Creator.GetTheMaterial();
+            if (creatorMaterial != null && cache.CreatedElements.TryGetValue(creatorMaterial.StepId, out materialId))
+               return materialId;
          }
 
          return ElementId.InvalidElementId;
       }
 
-      protected IFCRepresentationItem()
+      internal static IfcPresentationLayerAssignment SetShapeEdit(this IfcRepresentationItem representationItem, IFCImportShapeEditScope shapeEditScope, CreateElementIfcCache cache)
       {
+         IfcStyledItem styledByItem = representationItem.StyledByItem;
+         if (styledByItem != null)
+            styledByItem.Create(shapeEditScope, cache);
+
+         IfcPresentationLayerAssignment presentationLayerAssignment = representationItem.LayerAssignment.FirstOrDefault();
+         if (presentationLayerAssignment != null)
+            presentationLayerAssignment.CreatePresentationLayerAssignment(shapeEditScope, cache);
+         return presentationLayerAssignment;
       }
-
-      override protected void Process(IFCAnyHandle item)
-      {
-         base.Process(item);
-
-         LayerAssignment = IFCPresentationLayerAssignment.GetTheLayerAssignment(item, false);
-
-         // IFC2x has a different representation for styled items which we don't support.
-         if (IFCImportFile.TheFile.SchemaVersion >= IFCSchemaVersion.IFC2x2)
-         {
-            List<IFCAnyHandle> styledByItems = IFCAnyHandleUtil.GetAggregateInstanceAttribute<List<IFCAnyHandle>>(item, "StyledByItem");
-            if (styledByItems != null && styledByItems.Count > 0)
-            {
-               // We can only handle one styled item, but we allow the possiblity that there are duplicates.  Do a top-level check.
-               foreach (IFCAnyHandle styledByItem in styledByItems)
-               {
-                  if (!IFCAnyHandleUtil.IsSubTypeOf(styledByItem, IFCEntityType.IfcStyledItem))
-                  {
-                     Importer.TheLog.LogUnexpectedTypeError(styledByItem, IFCEntityType.IfcStyledItem, false);
-                     StyledByItem = null;
-                     break;
-                  }
-                  else
-                  {
-                     if (StyledByItem == null)
-                        StyledByItem = IFCStyledItem.ProcessIFCStyledItem(styledByItem);
-                     else
-                     {
-                        IFCStyledItem compStyledByItem = IFCStyledItem.ProcessIFCStyledItem(styledByItem);
-                        if (!StyledByItem.IsEquivalentTo(compStyledByItem))
-                        {
-                           Importer.TheLog.LogWarning(Id, "Multiple inconsistent styled items found for this item; using first one.", false);
-                           break;
-                        }
-                     }
-                  }
-               }
-            }
-         }
-      }
-
-      /// <summary>
-      /// Deal with missing "LayerAssignments" in IFC2x3 EXP file.
-      /// </summary>
-      /// <param name="layerAssignment">The layer assignment to add to this representation.</param>
-      public void PostProcessLayerAssignment(IFCPresentationLayerAssignment layerAssignment)
-      {
-         if (LayerAssignment == null)
-            LayerAssignment = layerAssignment;
-         else
-            IFCImportDataUtil.CheckLayerAssignmentConsistency(LayerAssignment, layerAssignment, Id);
-      }
-
       /// <summary>
       /// Create geometry for a particular representation item.
       /// </summary>
@@ -138,17 +73,13 @@ namespace Revit.IFC.Import.Data
       /// <param name="lcs">Local coordinate system for the geometry, without scale.</param>
       /// <param name="scaledLcs">Local coordinate system for the geometry, including scale, potentially non-uniform.</param>
       /// <param name="guid">The guid of an element for which represntation is being created.</param>
-      public void CreateShape(IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
+      public static void CreateShape(this IfcRepresentationItem representationItem, CreateElementIfcCache cache, IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
       {
-         if (StyledByItem != null)
-            StyledByItem.Create(shapeEditScope);
+         IfcPresentationLayerAssignment presentationLayerAssignment = representationItem.SetShapeEdit(shapeEditScope, cache);
 
-         if (LayerAssignment != null)
-            LayerAssignment.Create(shapeEditScope);
-
-         using (IFCImportShapeEditScope.IFCMaterialStack stack = new IFCImportShapeEditScope.IFCMaterialStack(shapeEditScope, StyledByItem, LayerAssignment))
+         using (IFCImportShapeEditScope.IFCMaterialStack stack = new IFCImportShapeEditScope.IFCMaterialStack(shapeEditScope, cache, representationItem.StyledByItem, presentationLayerAssignment))
          {
-            CreateShapeInternal(shapeEditScope, lcs, scaledLcs, guid);
+           representationItem.CreateShapeItem(cache, shapeEditScope, lcs, scaledLcs, guid);
          }
       }
 
@@ -158,50 +89,91 @@ namespace Revit.IFC.Import.Data
       /// <param name="shapeEditScope">The geometry creation scope.</param>
       /// <param name="lcs">Local coordinate system for the geometry.</param>
       /// <param name="guid">The guid of an element for which represntation is being created.</param>
-      virtual protected void CreateShapeInternal(IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
+      internal static void CreateShapeItem(this IfcRepresentationItem representationItem, CreateElementIfcCache cache, IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
       {
-      }
+         IfcGeometricRepresentationItem geometricRepresentationItem = representationItem as IfcGeometricRepresentationItem;
+         if (geometricRepresentationItem != null)
+         {
+            IfcSolidModel solidModel = representationItem as IfcSolidModel;
+            if (solidModel != null)
+               solidModel.CreateShapeSolidModel(cache, shapeEditScope, lcs, scaledLcs, guid);
+            else
+            {
+               IfcBooleanResult booleanResult = representationItem as IfcBooleanResult;
+               if (booleanResult != null)
+                  booleanResult.CreateShapeBooleanResult(cache, shapeEditScope, lcs, scaledLcs, guid);
+               else
+               {
+                  IfcConnectedFaceSet connectedFaceSet = representationItem as IfcConnectedFaceSet;
+                  if (connectedFaceSet != null)
+                     connectedFaceSet.CreateShapeConnectedFaceSet(cache, shapeEditScope, lcs, scaledLcs, guid, true);
+                  else
+                  {
+                     IfcCurve curve = representationItem as IfcCurve;
+                     if (curve != null)
+                        curve.CreateShapeCurve(cache, shapeEditScope, lcs, scaledLcs, guid);
+                     else
+                     {
+                        IfcGeometricSet geometricSet = representationItem as IfcGeometricSet;
+                        if (geometricSet != null)
+                           geometricSet.CreateShapeGeometricSet(cache, shapeEditScope, lcs, scaledLcs, guid);
+                        else
+                        {
 
-      protected IFCRepresentationItem(IFCAnyHandle item)
-      {
-      }
+                           IfcManifoldSolidBrep manifoldSolidBrep = representationItem as IfcManifoldSolidBrep;
+                           if (manifoldSolidBrep != null)
+                              manifoldSolidBrep.CreateShapeManifoldSolidBrep(cache, shapeEditScope, lcs, scaledLcs, guid);
+                           else
+                           {
 
-      /// <summary>
-      /// Processes an IfcRepresentationItem entity handle.
-      /// </summary>
-      /// <param name="ifcRepresentationItem">The IfcRepresentationItem handle.</param>
-      /// <returns>The IFCRepresentationItem object.</returns>
-      public static IFCRepresentationItem ProcessIFCRepresentationItem(IFCAnyHandle ifcRepresentationItem)
-      {
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcRepresentationItem, IFCEntityType.IfcBooleanResult))
-            return IFCBooleanResult.ProcessIFCBooleanResult(ifcRepresentationItem);
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcRepresentationItem, IFCEntityType.IfcCurve))
-            return IFCCurve.ProcessIFCCurve(ifcRepresentationItem);
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcRepresentationItem, IFCEntityType.IfcFaceBasedSurfaceModel))
-            return IFCFaceBasedSurfaceModel.ProcessIFCFaceBasedSurfaceModel(ifcRepresentationItem);
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcRepresentationItem, IFCEntityType.IfcGeometricSet))
-            return IFCGeometricSet.ProcessIFCGeometricSet(ifcRepresentationItem);
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcRepresentationItem, IFCEntityType.IfcMappedItem))
-            return IFCMappedItem.ProcessIFCMappedItem(ifcRepresentationItem);
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcRepresentationItem, IFCEntityType.IfcShellBasedSurfaceModel))
-            return IFCShellBasedSurfaceModel.ProcessIFCShellBasedSurfaceModel(ifcRepresentationItem);
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcRepresentationItem, IFCEntityType.IfcSolidModel))
-            return IFCSolidModel.ProcessIFCSolidModel(ifcRepresentationItem);
+                              IfcShellBasedSurfaceModel shellBasedSurfaceModel = representationItem as IfcShellBasedSurfaceModel;
+                              if (shellBasedSurfaceModel != null)
+                              {
+                                 shellBasedSurfaceModel.CreateShapeShellBasedSurfaceModel(cache, shapeEditScope, lcs, scaledLcs, guid);
+                              }
+                              else
+                              {
+                                 IfcTriangulatedFaceSet triangulatedFaceSet = representationItem as IfcTriangulatedFaceSet;
+                                 if (triangulatedFaceSet != null)
+                                    triangulatedFaceSet.CreateShapeTriangulatedFaceSet(cache, shapeEditScope, lcs, scaledLcs, guid);
+                                 else
+                                 {
+                                    Importer.TheLog.LogUnhandledSubTypeError(representationItem, IFCEntityType.IfcRepresentationItem, true);
+                                 }
+                              }
+                           }
+                        }
 
-         if (IFCImportFile.TheFile.SchemaVersion >= IFCSchemaVersion.IFC2x2 && IFCAnyHandleUtil.IsSubTypeOf(ifcRepresentationItem, IFCEntityType.IfcStyledItem))
-            return IFCStyledItem.ProcessIFCStyledItem(ifcRepresentationItem);
-
-         if (IFCImportFile.TheFile.SchemaVersion >= IFCSchemaVersion.IFC4 && IFCAnyHandleUtil.IsSubTypeOf(ifcRepresentationItem, IFCEntityType.IfcTriangulatedFaceSet))
-            return IFCTriangulatedFaceSet.ProcessIFCTriangulatedFaceSet(ifcRepresentationItem);
-
-         if (IFCImportFile.TheFile.SchemaVersion >= IFCSchemaVersion.IFC4Add2 && IFCAnyHandleUtil.IsSubTypeOf(ifcRepresentationItem, IFCEntityType.IfcPolygonalFaceSet))
-            return IFCPolygonalFaceSet.ProcessIFCPolygonalFaceSet(ifcRepresentationItem);
-
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcRepresentationItem, IFCEntityType.IfcTopologicalRepresentationItem))
-            return IFCTopologicalRepresentationItem.ProcessIFCTopologicalRepresentationItem(ifcRepresentationItem);
-
-         Importer.TheLog.LogUnhandledSubTypeError(ifcRepresentationItem, IFCEntityType.IfcRepresentationItem, true);
-         return null;
+                     }
+                  }
+               }
+            }
+            
+         }
+         else
+         {
+            IfcMappedItem mappedItem = representationItem as IfcMappedItem;
+            if(mappedItem != null)
+            {
+               mappedItem.CreateShapeMappedItem(cache, shapeEditScope, lcs, scaledLcs, guid);
+            }
+            else
+            {
+               IfcTopologicalRepresentationItem topologicalRepresentationItem = representationItem as IfcTopologicalRepresentationItem;
+               if(topologicalRepresentationItem != null)
+               {
+                  IfcFace face = topologicalRepresentationItem as IfcFace;
+                  if (face != null)
+                      face.CreateShapeFace(cache, shapeEditScope, lcs, scaledLcs, guid);
+                  else
+                  {
+                     IfcFaceBound faceBound = topologicalRepresentationItem as IfcFaceBound;
+                     if (faceBound != null)
+                        faceBound.CreateShapeFaceBound(cache, shapeEditScope, lcs, scaledLcs, guid);
+                  }
+               }
+            }
+         }
       }
    }
 }

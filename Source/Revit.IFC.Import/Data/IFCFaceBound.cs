@@ -30,59 +30,27 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc; 
+
 namespace Revit.IFC.Import.Data
 {
-   public class IFCFaceBound : IFCRepresentationItem
+   public static class IFCFaceBound
    {
-      IFCLoop m_Bound = null;
-
-      bool m_Orientation = true;
-
-      bool m_IsOuter = false;
-
-      /// <summary>
-      /// Return the defining loop of the face boundary.
-      /// </summary>
-      public IFCLoop Bound
+      public static bool IsOuter(this IfcFaceBound faceBound)
       {
-         get { return m_Bound; }
-         protected set { m_Bound = value; }
+         return faceBound is IfcFaceOuterBound;
       }
 
-      /// <summary>
-      /// Return the orientation of the defining loop of the face boundary.
-      /// </summary>
-      public bool Orientation
+      private static IList<XYZ> GetLoopVertices(this IfcFaceBound faceBound)
       {
-         get { return m_Orientation; }
-         protected set { m_Orientation = value; }
+         IfcLoop loop = faceBound.Bound;
+         IfcPolyloop polyloop = loop as IfcPolyloop;
+         if (polyloop != null)
+            return polyloop.Vertex();
+
+         return null;
       }
-
-      /// <summary>
-      /// Returns whether this is an outer boundary (TRUE) or an inner boundary (FALSE).
-      /// </summary>
-      public bool IsOuter
-      {
-         get { return m_IsOuter; }
-         protected set { m_IsOuter = value; }
-      }
-
-      protected IFCFaceBound()
-      {
-      }
-
-      override protected void Process(IFCAnyHandle ifcFaceBound)
-      {
-         base.Process(ifcFaceBound);
-
-         IFCAnyHandle ifcLoop = IFCImportHandleUtil.GetRequiredInstanceAttribute(ifcFaceBound, "Bound", true);
-
-         Bound = IFCLoop.ProcessIFCLoop(ifcLoop);
-
-         IsOuter = (IFCAnyHandleUtil.IsSubTypeOf(ifcFaceBound, IFCEntityType.IfcFaceOuterBound));
-      }
-
-      private void CreateTessellatedShapeInternal(IFCImportShapeEditScope shapeEditScope, Transform scaledLcs)
+      private static bool CreateTessellatedShapeInternal(this IfcFaceBound faceBound, IFCImportShapeEditScope shapeEditScope, Transform scaledLcs)
       {
          TessellatedShapeBuilderScope tsBuilderScope = shapeEditScope.BuilderScope as TessellatedShapeBuilderScope;
 
@@ -91,15 +59,16 @@ namespace Revit.IFC.Import.Data
             throw new InvalidOperationException("Expect a TessellatedShapeBuilderScope, but get a BrepBuilderScope instead");
          }
 
-         IList<XYZ> loopVertices = Bound.LoopVertices;
+         IList<XYZ> loopVertices = faceBound.GetLoopVertices();
          int count = 0;
          if (loopVertices == null || ((count = loopVertices.Count) == 0))
-            throw new InvalidOperationException("#" + Id + ": missing loop vertices, ignoring.");
+            throw new InvalidOperationException("#" + faceBound.StepId + ": missing loop vertices, ignoring.");
 
          if (count < 3)
-            throw new InvalidOperationException("#" + Id + ": too few loop vertices (" + count + "), ignoring.");
+            throw new InvalidOperationException("#" + faceBound.StepId + ": too few loop vertices (" + count + "), ignoring.");
 
-         if (!Orientation)
+
+         if (!faceBound.Orientation)
             loopVertices.Reverse();
 
          // Apply the transform
@@ -114,7 +83,7 @@ namespace Revit.IFC.Import.Data
          // Warn in this case.  If the entire boundary is bad, report an error and don't add the loop vertices.
 
          IList<XYZ> validVertices;
-         IFCGeometryUtil.CheckAnyDistanceVerticesWithinTolerance(Id, shapeEditScope, transformedVertices, out validVertices);
+         IFCGeometryUtil.CheckAnyDistanceVerticesWithinTolerance(faceBound.StepId, shapeEditScope, transformedVertices, out validVertices);
 
          // We are going to catch any exceptions if the loop is invalid.  
          // We are going to hope that we can heal the parent object in the TessellatedShapeBuilder.
@@ -123,7 +92,7 @@ namespace Revit.IFC.Import.Data
          count = validVertices.Count;
          if (count < 3)
          {
-            Importer.TheLog.LogComment(Id, "Too few distinct loop vertices (" + count + "), ignoring.", false);
+            Importer.TheLog.LogComment(faceBound.StepId, "Too few distinct loop vertices (" + count + "), ignoring.", false);
             bPotentiallyAbortFace = true;
          }
          else
@@ -152,7 +121,7 @@ namespace Revit.IFC.Import.Data
 
             if (!foundNormal)
             {
-               Importer.TheLog.LogComment(Id, "Loop is degenerate, ignoring.", false);
+               Importer.TheLog.LogComment(faceBound.StepId, "Loop is degenerate, ignoring.", false);
                bPotentiallyAbortFace = true;
             }
             else
@@ -165,18 +134,22 @@ namespace Revit.IFC.Import.Data
                      (validVertices[thirdPointIndex] - firstPoint).DotProduct(planeNormal) * planeNormal;
                   if (pointOnPlane.DistanceTo(validVertices[thirdPointIndex]) > vertexEps)
                   {
-                     Importer.TheLog.LogComment(Id, "Bounded loop plane is slightly non-planar, correcting.", false);
+                     Importer.TheLog.LogComment(faceBound.StepId, "Bounded loop plane is slightly non-planar, correcting.", false);
                      validVertices[thirdPointIndex] = pointOnPlane;
                   }
                }
 
-               if (!tsBuilderScope.AddLoopVertices(Id, validVertices))
+               if (!tsBuilderScope.AddLoopVertices(faceBound.StepId, validVertices))
                   bPotentiallyAbortFace = true;
             }
          }
 
-         if (bPotentiallyAbortFace && IsOuter)
+         if (bPotentiallyAbortFace && faceBound.IsOuter())
+         {
             tsBuilderScope.AbortCurrentFace();
+            return false;
+         }
+         return true;
       }
 
       /// <summary>
@@ -186,42 +159,21 @@ namespace Revit.IFC.Import.Data
       /// <param name="lcs">Local coordinate system for the geometry, without scale.</param>
       /// <param name="scaledLcs">Local coordinate system for the geometry, including scale, potentially non-uniform.</param>
       /// <param name="guid">The guid of an element for which represntation is being created.</param>
-      protected override void CreateShapeInternal(IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
+      internal static bool CreateShapeFaceBound(this IfcFaceBound faceBound, CreateElementIfcCache cache, IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
       {
          if (shapeEditScope.BuilderScope == null)
          {
             throw new InvalidOperationException("BuilderScope has not been initialised");
          }
-         base.CreateShapeInternal(shapeEditScope, lcs, scaledLcs, guid);
-         Bound.CreateShape(shapeEditScope, lcs, scaledLcs, guid);
-         IsValidForCreation = Bound.IsValidForCreation;
+
+         //faceBound.Bound.CreateShape(cache, shapeEditScope, lcs, scaledLcs, guid);
+         if (faceBound.Bound.CreateShapeLoop(cache, shapeEditScope, lcs, scaledLcs, guid))
+            return true;
 
          if (shapeEditScope.BuilderType == IFCShapeBuilderType.TessellatedShapeBuilder)
-            CreateTessellatedShapeInternal(shapeEditScope, scaledLcs);
-      }
+            return faceBound.CreateTessellatedShapeInternal(shapeEditScope, scaledLcs);
 
-      protected IFCFaceBound(IFCAnyHandle ifcFaceBound)
-      {
-         Process(ifcFaceBound);
+         return false;
       }
-
-      /// <summary>
-      /// Create an IFCFaceBound object from a handle of type IfcFaceBound.
-      /// </summary>
-      /// <param name="ifcFaceBound">The IFC handle.</param>
-      /// <returns>The IFCFaceBound object.</returns>
-      public static IFCFaceBound ProcessIFCFaceBound(IFCAnyHandle ifcFaceBound)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcFaceBound))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcFaceBound);
-            return null;
-         }
-
-         IFCEntity faceBound;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcFaceBound.StepId, out faceBound))
-            faceBound = new IFCFaceBound(ifcFaceBound);
-         return (faceBound as IFCFaceBound);
-      }
-   }
+   } 
 }

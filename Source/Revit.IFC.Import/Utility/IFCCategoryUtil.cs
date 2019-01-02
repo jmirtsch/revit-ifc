@@ -29,6 +29,8 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Common.Utility;
 using Revit.IFC.Common.Enums;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Utility
 {
    /// <summary>
@@ -163,9 +165,9 @@ namespace Revit.IFC.Import.Utility
          return (string.Compare(nospace1, nospace2, true) == 0);
       }
 
-      private static bool IsColumnLoadBearing(IFCObjectDefinition originalEntity)
+      private static bool IsColumnLoadBearing(IfcObjectDefinition originalEntity)
       {
-         IFCObjectDefinition entity = originalEntity;
+         IfcObjectDefinition entity = originalEntity;
 
          if (entity == null)
             throw new InvalidOperationException("Function called for null entity.");
@@ -173,43 +175,38 @@ namespace Revit.IFC.Import.Utility
          // If the entity is an IFCTypeObject, get an associated IFCObject.  IFCColumnType doesn't
          // know if it is load bearing or not.
          // TODO: Check that all of the DefinedObjects have the same load bearing property, and warn otherwise.
-         if (!(entity is IFCObject))
+         IfcObject ifcObject = entity as IfcObject;
+         if (ifcObject == null)
          {
-            if (entity is IFCTypeObject)
+            IfcTypeObject typeObject = entity as IfcTypeObject;
+            if (typeObject != null)
             {
-               IFCTypeObject typeObject = entity as IFCTypeObject;
-               if (typeObject.DefinedObjects.Count == 0)
+               entity = typeObject.ObjectTypeOf.RelatedObjects.FirstOrDefault();
+               if(entity == null)
                   return false;
-               entity = typeObject.DefinedObjects.First();
             }
             else
                return false;
          }
 
-         IFCObject columnEntity = entity as IFCObject;
-         IDictionary<string, IFCPropertySetDefinition> columnPropertySets = columnEntity.PropertySets;
-         IFCPropertySetDefinition psetColumnCommonDef = null;
-         if (columnPropertySets == null || (!columnPropertySets.TryGetValue("Pset_ColumnCommon", out psetColumnCommonDef)))
+         IfcObject columnEntity = entity as IfcObject;
+         IfcPropertySetDefinition psetColumnCommonDef =  columnEntity.FindPropertySet("Pset_ColumnCommon");
+         if (psetColumnCommonDef == null)
             return false;
 
-         if (!(psetColumnCommonDef is IFCPropertySet))
+         IfcPropertySet psetColumnCommon = psetColumnCommonDef as IfcPropertySet;
+         if(psetColumnCommon == null)
             throw new InvalidOperationException("Invalid Pset_ColumnCommon class.");
 
-         IFCPropertySet psetColumnCommon = psetColumnCommonDef as IFCPropertySet;
-         IDictionary<string, IFCProperty> columnCommonProperties = psetColumnCommon.IFCProperties;
-         IFCProperty loadBearingPropertyBase = null;
-         if (columnCommonProperties == null || (!columnCommonProperties.TryGetValue("LoadBearing", out loadBearingPropertyBase)))
+         IfcProperty loadBearingPropertyBase = psetColumnCommon["LoadBearing"];
+         if (loadBearingPropertyBase == null)
             return false;
 
-         if (!(loadBearingPropertyBase is IFCSimpleProperty))
+         IfcPropertySingleValue loadBearingProperty = loadBearingPropertyBase as IfcPropertySingleValue;
+         if (loadBearingProperty == null)
             throw new InvalidOperationException("Invalid Pset_ColumnCommon::LoadBearing property.");
 
-         IFCSimpleProperty loadBearingProperty = loadBearingPropertyBase as IFCSimpleProperty;
-         IList<IFCPropertyValue> propertyValues = loadBearingProperty.IFCPropertyValues;
-         if (propertyValues == null || propertyValues.Count == 0 || !propertyValues[0].HasValue())
-            return false;
-
-         return propertyValues[0].AsBoolean();
+         return Convert.ToBoolean(loadBearingProperty.NominalValue.Value);
       }
 
       /// <summary>
@@ -218,18 +215,18 @@ namespace Revit.IFC.Import.Utility
       /// <param name="entity">The entity.</param>
       /// <param name="typeEntityType">The IfcTypeObject entity type, if it exists.</param>
       /// <param name="typePredefinedType">The IfcTypeObject predefined type, if it exists.</param>
-      private static void GetAssociatedTypeEntityInfo(IFCObjectDefinition entity, out IFCEntityType? typeEntityType, out string typePredefinedType)
+      private static void GetAssociatedTypeEntityInfo(IfcObjectDefinition entity, out IFCEntityType? typeEntityType, out string typePredefinedType)
       {
          typeEntityType = null;
          typePredefinedType = null;
-         if (entity is IFCObject)
+         IfcObject ifcObject = entity as IfcObject;
+         if (ifcObject != null)
          {
-            IFCObject ifcObject = entity as IFCObject;
-            if (ifcObject.TypeObjects != null && ifcObject.TypeObjects.Count > 0)
+            IfcTypeObject typeObject = ifcObject.RelatingType();
+            if (typeObject != null)
             {
-               IFCTypeObject typeObject = ifcObject.TypeObjects.First();
-               typeEntityType = typeObject.EntityType;
-               typePredefinedType = typeObject.PredefinedType;
+               typeEntityType = typeObject.GetEntityType();
+               typePredefinedType = typeObject.GetPredefinedType();
             }
          }
       }
@@ -240,10 +237,12 @@ namespace Revit.IFC.Import.Utility
       /// <param name="entity">The entity.</param>
       /// <returns>The category name.</returns>
       /// <remarks>This will also be used to populate the IfcExportAs parameter.</remarks>
-      public static string GetCustomCategoryName(IFCObjectDefinition entity)
+      public static string GetCustomCategoryName(IfcObjectDefinition entity)
       {
-         IFCEntityType entityType = entity.EntityType;
-         string predefinedType = entity.PredefinedType;
+         IFCEntityType entityType;
+         if (!Enum.TryParse<IFCEntityType>(entity.StepClassName, out entityType))
+            entityType = IFCEntityType.UnKnown;
+         string predefinedType = entity.GetPredefinedType();
 
          IFCEntityType? typeEntityType = null;
          string typePredefinedType = null;
@@ -629,7 +628,7 @@ namespace Revit.IFC.Import.Utility
          return true;
       }
 
-      private static Category GetOrCreateSubcategory(Document doc, int id, string subCategoryName)
+      private static Category GetOrCreateSubcategory(CreateElementIfcCache cache, int id, string subCategoryName)
       {
          if (string.IsNullOrWhiteSpace(subCategoryName))
             return null;
@@ -643,7 +642,8 @@ namespace Revit.IFC.Import.Utility
             try
             {
                CategoryNameMap subCategories = Importer.TheCache.GenericModelsCategory.SubCategories;
-               subCategory = subCategories.get_Item(subCategoryName);
+               if(subCategories.Contains(subCategoryName))
+                  subCategory = subCategories.get_Item(subCategoryName);
             }
             catch
             {
@@ -653,7 +653,7 @@ namespace Revit.IFC.Import.Utility
             if (subCategory == null)
             {
                subCategory = Importer.TheCache.DocumentCategories.NewSubcategory(Importer.TheCache.GenericModelsCategory, subCategoryName);
-               CreateMaterialsForSpecialSubcategories(doc, id, subCategory, subCategoryName);
+               CreateMaterialsForSpecialSubcategories(cache, id, subCategory, subCategoryName);
             }
 
             createdSubcategories[subCategoryName] = subCategory;
@@ -669,7 +669,7 @@ namespace Revit.IFC.Import.Utility
       /// <param name="category">The category class.</param>
       /// <param name="id">The id of the generating entity.</param>
       /// <param name="subCategoryName">The name of the created (sub-)category.</param>
-      private static void CreateMaterialsForSpecialSubcategories(Document doc, int id, Category category, string subCategoryName)
+      private static void CreateMaterialsForSpecialSubcategories(CreateElementIfcCache cache, int id, Category category, string subCategoryName)
       {
          // A pair of material color (key) and transparency (value).
          KeyValuePair<Color, int> colorAndTransparency = new KeyValuePair<Color, int>(null, 127);
@@ -692,10 +692,10 @@ namespace Revit.IFC.Import.Utility
 
          if (materialInfo != null)
          {
-            ElementId createdElementId = IFCMaterial.CreateMaterialElem(doc, id, subCategoryName, materialInfo);
+            ElementId createdElementId = IFCMaterial.CreateMaterialElem(cache, id, subCategoryName, materialInfo);
             if (createdElementId != ElementId.InvalidElementId)
             {
-               Material material = doc.GetElement(createdElementId) as Material;
+               Material material = cache.Document.GetElement(createdElementId) as Material;
                category.Material = material;
             }
          }
@@ -708,18 +708,18 @@ namespace Revit.IFC.Import.Utility
       /// <param name="entity">The entity.</param>
       /// <param name="gstyleId">The graphics style, if the returned category is not top level.  This allows shapes to have their visibility controlled by the sub-category.</param>
       /// <returns>The element id for the built-in category.</returns>
-      public static ElementId GetCategoryIdForEntity(Document doc, IFCObjectDefinition entity, out ElementId gstyleId)
+      public static ElementId GetCategoryIdForEntity(CreateElementIfcCache cache, IfcObjectDefinition entity, out ElementId gstyleId)
       {
          gstyleId = ElementId.InvalidElementId;
 
-         IFCEntityType entityType = entity.EntityType;
+         IFCEntityType entityType = entity.GetEntityType();
 
          IFCEntityType? typeEntityType = null;
          string typePredefinedType = null;
          GetAssociatedTypeEntityInfo(entity, out typeEntityType, out typePredefinedType);
 
          // Use the IfcTypeObject predefined type if the IfcElement predefined type is either null, empty, white space, or not defined.
-         string predefinedType = entity.PredefinedType;
+         string predefinedType = entity.GetPredefinedType();
          if ((string.IsNullOrWhiteSpace(predefinedType) || (string.Compare(predefinedType, "NOTDEFINED", true) == 0)) &&
              !string.IsNullOrWhiteSpace(typePredefinedType))
             predefinedType = typePredefinedType;
@@ -739,7 +739,7 @@ namespace Revit.IFC.Import.Utility
          }
          catch (Exception ex)
          {
-            Importer.TheLog.LogWarning(entity.Id, ex.Message, false);
+            Importer.TheLog.LogWarning(entity.StepId, ex.Message, false);
          }
 
          ElementId catElemId = GetCategoryElementId(entityType, predefinedType);
@@ -756,7 +756,7 @@ namespace Revit.IFC.Import.Utility
          {
             string subCategoryName = GetCustomCategoryName(entity);
 
-            subCategory = GetOrCreateSubcategory(doc, entity.Id, subCategoryName);
+            subCategory = GetOrCreateSubcategory(cache, entity.StepId, subCategoryName);
             if (subCategory != null)
             {
                GraphicsStyle graphicsStyle = subCategory.GetGraphicsStyle(GraphicsStyleType.Projection);
@@ -785,7 +785,7 @@ namespace Revit.IFC.Import.Utility
                   msg += " (" + typeEntityType.Value.ToString() + ")";
 
                msg += " to Generic Models.";
-               Importer.TheLog.LogWarning(entity.Id, msg, true);
+               Importer.TheLog.LogWarning(entity.StepId, msg, true);
             }
          }
 
@@ -824,7 +824,7 @@ namespace Revit.IFC.Import.Utility
       /// <param name="repId">The representation identifier.</param>
       /// <param name="category">The top-level category id for the element.</param>
       /// <returns>The sub-category.  This allows shapes to have their visibility controlled by the sub-category.</param></returns>
-      public static Category GetSubCategoryForRepresentation(Document doc, int entityId, IFCRepresentationIdentifier repId)
+      public static Category GetSubCategoryForRepresentation(CreateElementIfcCache cache, int entityId, IFCRepresentationIdentifier repId)
       {
          if (repId == IFCRepresentationIdentifier.Body || repId == IFCRepresentationIdentifier.Unhandled)
             return null;
@@ -834,7 +834,7 @@ namespace Revit.IFC.Import.Utility
             return null;
 
          string subCategoryName = repId.ToString();
-         Category subCategory = GetOrCreateSubcategory(doc, entityId, subCategoryName);
+         Category subCategory = GetOrCreateSubcategory(cache, entityId, subCategoryName);
          return subCategory;
       }
    }

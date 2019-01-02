@@ -29,93 +29,108 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
-   public abstract class IFCCurve : IFCRepresentationItem
+   public static class IFCCurve
    {
-      // One of m_Curve or m_CurveLoop will be non-null.
-      Curve m_Curve = null;
-
-      CurveLoop m_CurveLoop = null;
-
-      // In theory, some IfcCurves may use a non-unit length IfcVector to influence the parametrization of the underlying curve.
-      // While in practice this is unlikely, we keep this value to be complete.
-      double m_ParametericScaling = 1.0;
-
-      protected double ParametericScaling
-      {
-         get { return m_ParametericScaling; }
-         set { m_ParametericScaling = value; }
-      }
 
       /// <summary>
       /// Get the Curve representation of IFCCurve.  It could be null.
       /// </summary>
-      public Curve Curve
+      public static Curve Curve(this IfcCurve curve)
       {
-         get { return m_Curve; }
-         protected set { m_Curve = value; }
+         if (curve == null)
+         {
+            Importer.TheLog.LogNullError(IFCEntityType.IfcCurve);
+            return null;
+         }
+         IfcBoundedCurve boundedCurve = curve as IfcBoundedCurve;
+         if (boundedCurve != null)
+            return boundedCurve.Curve();
+         IfcConic conic = curve as IfcConic;
+         if (conic != null)
+            return conic.Curve();
+         IfcLine line = curve as IfcLine;
+         if (line != null)
+            return line.Line();
+         IfcOffsetCurve2D offsetCurve2D = curve as IfcOffsetCurve2D;
+         if (offsetCurve2D != null)
+            return offsetCurve2D.Curve();
+         IfcOffsetCurve3D offsetCurve3D = curve as IfcOffsetCurve3D;
+         if (offsetCurve3D != null)
+            return offsetCurve3D.Curve();
+         return null;
       }
-
+      public static CurveLoop CurveLoop(this IfcCurve curve)
+      {
+         if (curve == null)
+         {
+            Importer.TheLog.LogNullError(IFCEntityType.IfcCurve);
+            return null;
+         }
+         
+         IfcOffsetCurve2D offsetCurve2D = curve as IfcOffsetCurve2D;
+         if (offsetCurve2D != null)
+            return offsetCurve2D.CurveLoop();
+         IfcOffsetCurve3D offsetCurve3D = curve as IfcOffsetCurve3D;
+         if (offsetCurve3D != null)
+            return offsetCurve3D.CurveLoop();
+         return null;
+      }
+     
       /// <summary>
       /// Get the CurveLoop representation of IFCCurve.  It could be null.
       /// </summary>
-      public CurveLoop CurveLoop
+      public static CurveLoop GetCurveLoop(this IfcCurve ifcCurve)
       {
-         get { return m_CurveLoop; }
-         protected set { m_CurveLoop = value; }
+         Curve curve = ifcCurve.Curve();
+         if(curve == null)
+            return null;
+         CurveLoop curveLoop = new CurveLoop();
+         curveLoop.Append(curve);
+         return curveLoop;
       }
 
       /// <summary>
       /// Get the curve or CurveLoop representation of IFCCurve, as a list of 0 or more curves.
       /// </summary>
-      public IList<Curve> GetCurves()
+      public static IList<Curve> GetCurves(this IfcCurve ifcCurve)
       {
-         IList<Curve> curves = new List<Curve>();
-
-         if (Curve != null)
-            curves.Add(Curve);
-         else if (CurveLoop != null)
+         Curve curve = ifcCurve.Curve();
+         if (curve != null)
+            return new List<Curve>() { curve };
+         List<Curve> curves = new List<Curve>();
+         CurveLoop curveLoop = ifcCurve.CurveLoop();
+         if(curveLoop != null)
          {
-            foreach (Curve curve in CurveLoop)
-               curves.Add(curve);
+            foreach (Curve c in curveLoop)
+               curves.Add(c);
          }
 
          return curves;
       }
 
       /// <summary>
-      /// Get the curve or CurveLoop representation of IFCCurve, as a CurveLoop.  This will have a value, as long as Curve or CurveLoop do.
-      /// </summary>
-      public CurveLoop GetCurveLoop()
-      {
-         if (CurveLoop != null)
-            return CurveLoop;
-         if (Curve == null)
-            return null;
-
-         CurveLoop curveAsCurveLoop = new CurveLoop();
-         curveAsCurveLoop.Append(Curve);
-         return curveAsCurveLoop;
-      }
-
-      /// <summary>
       /// Calculates the normal of the plane of the curve or curve loop.
       /// </summary>
       /// <returns>The normal, or null if there is no curve or curve loop.</returns>
-      public XYZ GetNormal()
+      public static XYZ GetNormal(this IfcCurve ifcCurve)
       {
-         if (Curve != null)
+         Curve curve = ifcCurve.Curve();
+         if(curve != null)
          {
-            Transform transform = Curve.ComputeDerivatives(0, false);
+            Transform transform = curve.ComputeDerivatives(0, false);
             if (transform != null)
                return transform.BasisZ;
          }
-         else if (CurveLoop != null)
+         CurveLoop curveLoop = ifcCurve.CurveLoop();
+         if (curveLoop != null)
          {
             try
             {
-               Plane plane = CurveLoop.GetPlane();
+               Plane plane = curveLoop.GetPlane();
                if (plane != null)
                   return plane.Normal;
             }
@@ -127,56 +142,16 @@ namespace Revit.IFC.Import.Data
          return null;
       }
 
-      protected IFCCurve()
-      {
-      }
+      
 
-      override protected void Process(IFCAnyHandle ifcCurve)
-      {
-         base.Process(ifcCurve);
-      }
+      
 
-      protected IFCCurve(IFCAnyHandle profileDef)
-      {
-         Process(profileDef);
-      }
-
-      /// <summary>
-      /// Create an IFCCurve object from a handle of type IfcCurve.
-      /// </summary>
-      /// <param name="ifcCurve">The IFC handle.</param>
-      /// <returns>The IFCCurve object.</returns>
-      public static IFCCurve ProcessIFCCurve(IFCAnyHandle ifcCurve)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcCurve))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcCurve);
-            return null;
-         }
-
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcCurve, IFCEntityType.IfcBoundedCurve))
-            return IFCBoundedCurve.ProcessIFCBoundedCurve(ifcCurve);
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcCurve, IFCEntityType.IfcConic))
-            return IFCConic.ProcessIFCConic(ifcCurve);
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcCurve, IFCEntityType.IfcLine))
-            return IFCLine.ProcessIFCLine(ifcCurve);
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcCurve, IFCEntityType.IfcOffsetCurve2D))
-            return IFCOffsetCurve2D.ProcessIFCOffsetCurve2D(ifcCurve);
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcCurve, IFCEntityType.IfcOffsetCurve3D))
-            return IFCOffsetCurve3D.ProcessIFCOffsetCurve3D(ifcCurve);
-
-         Importer.TheLog.LogUnhandledSubTypeError(ifcCurve, IFCEntityType.IfcCurve, true);
-         return null;
-      }
-
-      private Curve CreateTransformedCurve(Curve baseCurve, IFCRepresentation parentRep, Transform lcs)
+      private static Curve CreateTransformedCurve(Curve baseCurve, IfcRepresentation parentRep, Transform lcs, int id)
       {
          Curve transformedCurve = (baseCurve != null) ? baseCurve.CreateTransformed(lcs) : null;
          if (transformedCurve == null)
          {
-            Importer.TheLog.LogWarning(Id, "couldn't create curve for " +
-                ((parentRep == null) ? "" : parentRep.Identifier.ToString()) +
-                " representation.", false);
+            Importer.TheLog.LogWarning(id, "couldn't create curve for " + ((parentRep == null) ? "" : parentRep.RepresentationIdentifier.ToString()) + " representation.", false);
          }
 
          return transformedCurve;
@@ -189,37 +164,42 @@ namespace Revit.IFC.Import.Data
       /// <param name="lcs">Local coordinate system for the geometry, without scale.</param>
       /// <param name="scaledLcs">Local coordinate system for the geometry, including scale, potentially non-uniform.</param>
       /// <param name="guid">The guid of an element for which represntation is being created.</param>
-      protected override void CreateShapeInternal(IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
+      internal static void CreateShapeCurve(this IfcCurve ifcCurve, CreateElementIfcCache cache, IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
       {
-         base.CreateShapeInternal(shapeEditScope, lcs, scaledLcs, guid);
-
-         IFCRepresentation parentRep = shapeEditScope.ContainingRepresentation;
+         IfcRepresentation parentRep = shapeEditScope.ContainingRepresentation;
 
          IList<Curve> transformedCurves = new List<Curve>();
-         if (Curve != null)
+         Curve curve = ifcCurve.Curve();
+         if (curve != null)
          {
-            Curve transformedCurve = CreateTransformedCurve(Curve, parentRep, lcs);
+            Curve transformedCurve = CreateTransformedCurve(curve, parentRep, lcs, ifcCurve.StepId);
             if (transformedCurve != null)
                transformedCurves.Add(transformedCurve);
          }
-         else if (CurveLoop != null)
+         else
          {
-            foreach (Curve curve in CurveLoop)
+            CurveLoop curveLoop = ifcCurve.CurveLoop();
+            if (curveLoop != null)
             {
-               Curve transformedCurve = CreateTransformedCurve(curve, parentRep, lcs);
-               if (transformedCurve != null)
-                  transformedCurves.Add(transformedCurve);
+               foreach (Curve c in curveLoop)
+               {
+                  Curve transformedCurve = CreateTransformedCurve(c, parentRep, lcs, ifcCurve.StepId);
+                  if (transformedCurve != null)
+                     transformedCurves.Add(transformedCurve);
+               }
             }
          }
 
          // TODO: set graphics style for footprint curves.
-         IFCRepresentationIdentifier repId = (parentRep == null) ? IFCRepresentationIdentifier.Unhandled : parentRep.Identifier;
+         IFCRepresentationIdentifier repId = IFCRepresentationIdentifier.Unhandled;
+         if (parentRep == null || !Enum.TryParse<IFCRepresentationIdentifier>(parentRep.RepresentationIdentifier, out repId))
+            repId = IFCRepresentationIdentifier.Unhandled;
          bool createModelGeometry = (repId == IFCRepresentationIdentifier.Body) || (repId == IFCRepresentationIdentifier.Axis) || (repId == IFCRepresentationIdentifier.Unhandled);
 
          ElementId gstyleId = ElementId.InvalidElementId;
          if (createModelGeometry)
          {
-            Category curveCategory = IFCCategoryUtil.GetSubCategoryForRepresentation(shapeEditScope.Document, Id, parentRep.Identifier);
+            Category curveCategory = IFCCategoryUtil.GetSubCategoryForRepresentation(cache, ifcCurve.StepId, repId);
             if (curveCategory != null)
             {
                GraphicsStyle graphicsStyle = curveCategory.GetGraphicsStyle(GraphicsStyleType.Projection);
@@ -228,17 +208,17 @@ namespace Revit.IFC.Import.Data
             }
          }
 
-         foreach (Curve curve in transformedCurves)
+         foreach (Curve c in transformedCurves)
          {
             if (createModelGeometry)
             {
                curve.SetGraphicsStyleId(gstyleId);
-               shapeEditScope.AddGeometry(IFCSolidInfo.Create(Id, curve));
+               shapeEditScope.Solids.Add(IFCSolidInfo.Create(ifcCurve.StepId, c));
             }
             else
             {
                // Default: assume a plan view curve.
-               shapeEditScope.AddFootprintCurve(curve);
+               shapeEditScope.FootPrintCurves.Add(c);
             }
          }
       }

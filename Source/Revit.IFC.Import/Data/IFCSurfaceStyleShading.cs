@@ -28,185 +28,126 @@ using Revit.IFC.Common.Enums;
 using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
    /// <summary>
    /// Class for IfcSurfaceStyleShading and subtype IfcSurfaceStyleRendering.
    /// </summary>
-   public class IFCSurfaceStyleShading : IFCEntity
+   public static class IFCSurfaceStyleShading
    {
-      private IFCColourRgb m_SurfaceColour = null;
-
-      private double m_Transparency = 0.0;
-
-      private IFCColourRgb m_DiffuseColour = null;
-      private double? m_DiffuseColourFactor = null;
-
-      private IFCColourRgb m_TransmissionColour = null;
-      private double? m_TransmissionColourFactor = null;
-
-      private IFCColourRgb m_DiffuseTransmissionColour = null;
-      private double? m_DiffuseTransmissionColourFactor = null;
-
-      private IFCColourRgb m_ReflectionColour = null;
-      private double? m_ReflectionColourFactor = null;
-
-      private IFCColourRgb m_SpecularColour = null;
-      private double? m_SpecularColourFactor = null;
-
-      // Only one of these two will be set.
-      private double? m_SpecularExponent = null;
-      private double? m_SpecularRoughness = null;
-
-      // TODO: handle.
-
-      //ReflectanceMethod   :   IfcReflectanceMethodEnum;  
-
-      protected IFCSurfaceStyleShading()
-      {
-      }
-
-      /// <summary>
-      /// Return the surface color of the shading style.
-      /// </summary>
-      public Color GetSurfaceColor()
-      {
-         if (m_SurfaceColour != null)
-            return m_SurfaceColour.GetColor();
-
-         // Default to gray.
-         return new Color(127, 127, 127);
-      }
-
-      private Color GetDefaultColor()
+      private static Color GetDefaultColor()
       {
          // Default to gray.
          return new Color(127, 127, 127);
       }
 
-      /// <summary>
-      /// Return the surface color of the shading style, scaled by a normalised factor.
-      /// </summary>
-      public Color GetSurfaceColor(double factor)
+      private static Color processColor(IfcColourOrFactor colourOrFactor, IfcColourRgb surfaceColour)
       {
-         if (m_SurfaceColour != null)
-            return m_SurfaceColour.GetScaledColor(factor);
+         IfcColourRgb colour = colourOrFactor as IfcColourRgb;
+         if (colour != null)
+            return colour.CreateColor();
+         IfcNormalisedRatioMeasure normalisedRatioMeasure = colourOrFactor as IfcNormalisedRatioMeasure;
+         if (normalisedRatioMeasure != null)
+            return surfaceColour.GetScaledColor(normalisedRatioMeasure.Measure);
          return GetDefaultColor();
       }
-
       /// <summary>
       /// Return the diffuse color of the shading style.
       /// </summary>
-      public Color GetDiffuseColor()
+      public static Color GetDiffuseColor(this IfcSurfaceStyleRendering rendering)
       {
-         if (m_DiffuseColour != null)
-            return m_DiffuseColour.GetColor();
-         if (m_DiffuseColourFactor.HasValue)
-            return GetSurfaceColor(m_DiffuseColourFactor.Value);
-         return GetDefaultColor();
+         return processColor(rendering.DiffuseColour, rendering.SurfaceColour);
       }
 
       /// <summary>
       /// Return the transmission color of the shading style.
       /// </summary>
-      public Color GetTransmissionColor()
+      public static Color GetTransmissionColor(this IfcSurfaceStyleRendering rendering)
       {
-         if (m_TransmissionColour != null)
-            return m_TransmissionColour.GetColor();
-         if (m_TransmissionColourFactor.HasValue)
-            return GetSurfaceColor(m_TransmissionColourFactor.Value);
-         return GetDefaultColor();
+         return processColor(rendering.TransmissionColour, rendering.SurfaceColour);
       }
 
       /// <summary>
       /// Return the diffuse transmission color of the shading style.
       /// </summary>
-      public Color GetDiffuseTransmissionColor()
+      public static Color GetDiffuseTransmissionColor(this IfcSurfaceStyleRendering rendering)
       {
-         if (m_DiffuseTransmissionColour != null)
-            return m_DiffuseTransmissionColour.GetColor();
-         if (m_DiffuseTransmissionColourFactor.HasValue)
-            return GetSurfaceColor(m_DiffuseTransmissionColourFactor.Value);
-         return GetDefaultColor();
+         return processColor(rendering.DiffuseTransmissionColour, rendering.SurfaceColour);
       }
 
       /// <summary>
       /// Return the reflection color of the shading style.
       /// </summary>
-      public Color GetReflectionColor()
+      public static Color GetReflectionColor(this IfcSurfaceStyleRendering rendering)
       {
-         if (m_ReflectionColour != null)
-            return m_ReflectionColour.GetColor();
-         if (m_ReflectionColourFactor.HasValue)
-            return GetSurfaceColor(m_ReflectionColourFactor.Value);
-         return GetDefaultColor();
+         return processColor(rendering.ReflectionColour, rendering.SurfaceColour);
       }
 
       /// <summary>
       /// Return the specular color of the shading style.
       /// </summary>
-      public Color GetSpecularColor()
+      public static Color GetSpecularColor(this IfcSurfaceStyleRendering rendering)
       {
-         if (m_SpecularColour != null)
-            return m_SpecularColour.GetColor();
-         if (m_SpecularColourFactor.HasValue)
-            return GetSurfaceColor(m_SpecularColourFactor.Value);
-         return GetDefaultColor();
-      }
-
-      /// <summary>
-      /// Returns the transparency of the shading style - 1.0 means completely transparent.
-      /// </summary>
-      public double Transparency
-      {
-         get { return m_Transparency; }
-         protected set { m_Transparency = value; }
+         return processColor(rendering.SpecularColour, rendering.SurfaceColour);
       }
 
       /// <summary>
       /// Calculates Revit shininess for a material based on the specular colour, if specified.
       /// </summary>
-      public int? GetSmoothness()
+      public static int? GetSmoothness(this IfcSurfaceStyleRendering rendering)
       {
-         if (m_SpecularColourFactor != null)
-            return (int)(m_SpecularColourFactor * 100 + 0.5);
-         if (m_SpecularColour == null)
+         IfcColourOrFactor colourOrFactor = rendering.SpecularColour;
+         IfcNormalisedRatioMeasure normalisedRatioMeasure = colourOrFactor as IfcNormalisedRatioMeasure;
+         if(normalisedRatioMeasure != null)
+            return (int)(normalisedRatioMeasure.Measure * 100 + 0.5);
+         IfcColourRgb specularColour = colourOrFactor as IfcColourRgb;
+         if (specularColour == null)
             return null;
 
          // heuristic: get average of three components.
-         double ave = (m_SpecularColour.NormalisedRed + m_SpecularColour.NormalisedBlue + m_SpecularColour.NormalisedGreen) / 3.0;
+         double ave = (specularColour.Red + specularColour.Blue + specularColour.Green) / 3.0;
          return (int)(ave * 100 + 0.5);
       }
 
+      
       /// <summary>
       /// Calculates Revit shininess for a material based on the specular highlight, if specified.
       /// </summary>
-      public int? GetShininess()
+      public static int? GetShininess(this IfcSurfaceStyleRendering rendering)
       {
          int shininess = 0;
          string warning = null;
 
          // Assumes that m_SpecularExponent or m_SpecularShininess is set.
          // Validates that the value is in the range [0,128].
-         if (m_SpecularExponent == null)
+         IfcSpecularHighlightSelect highlight = rendering.SpecularHighlight;
+         if (highlight == null)
+            return null;
+         IfcSpecularExponent specularExponent = highlight as IfcSpecularExponent;
+         if (specularExponent != null)
          {
-            if (m_SpecularRoughness == null)
-               return null;
-
-            // m_SpecularRoughness is a real from [0,1] and is the reverse of our shininess.
-            shininess = (int)((1.0 - m_SpecularRoughness.Value) * 128 + 0.5);
-
-            if ((shininess < 0) || (shininess > 128))
-               warning = "Specular Roughness of " + m_SpecularRoughness.Value + " is of out range, should be between 0 and 1.";
+            shininess = (int)(specularExponent.SpecularExponent);
          }
          else
          {
-            shininess = (int)(m_SpecularExponent.Value);
+            IfcSpecularRoughness specularRoughness = highlight as IfcSpecularRoughness;
+            if (specularRoughness != null)
+            {
 
-            if ((shininess < 0) || (shininess > 128))
-               warning = "Specular Exponent of " + m_SpecularExponent.Value + " is of out range, should be between 0 and 128.";
+               // m_SpecularRoughness is a real from [0,1] and is the reverse of our shininess.
+               shininess = (int)((1.0 - specularRoughness.SpecularRoughness) * 128 + 0.5);
+
+               if ((shininess < 0) || (shininess > 128))
+                  warning = "Specular Roughness of " + specularRoughness.SpecularRoughness + " is of out range, should be between 0 and 1.";
+            }
          }
 
+         if (shininess < 0)
+            shininess = 0;
+         else if (shininess > 128)
+            shininess = 128;
 
          if (shininess < 0)
             shininess = 0;
@@ -214,100 +155,10 @@ namespace Revit.IFC.Import.Data
             shininess = 128;
 
          if (warning != null)
-            Importer.TheLog.LogWarning(Id, warning, true);
+            Importer.TheLog.LogWarning(rendering.StepId, warning, true);
 
          return shininess;
       }
 
-      override protected void Process(IFCAnyHandle item)
-      {
-         base.Process(item);
-
-         IFCAnyHandle surfaceColour = IFCImportHandleUtil.GetRequiredInstanceAttribute(item, "SurfaceColour", false);
-         if (!IFCAnyHandleUtil.IsNullOrHasNoValue(surfaceColour))
-            m_SurfaceColour = IFCColourRgb.ProcessIFCColourRgb(surfaceColour);
-
-         if (IFCAnyHandleUtil.IsSubTypeOf(item, IFCEntityType.IfcSurfaceStyleRendering))
-         {
-            Transparency = IFCImportHandleUtil.GetOptionalNormalisedRatioAttribute(item, "Transparency", 0.0);
-
-            IFCData diffuseColour = item.GetAttribute("DiffuseColour");
-            if (diffuseColour.PrimitiveType == IFCDataPrimitiveType.Instance)
-               m_DiffuseColour = IFCColourRgb.ProcessIFCColourRgb(diffuseColour.AsInstance());
-            else if (diffuseColour.PrimitiveType == IFCDataPrimitiveType.Double)
-               m_DiffuseColourFactor = diffuseColour.AsDouble();
-
-            IFCData transmissionColour = item.GetAttribute("TransmissionColour");
-            if (transmissionColour.PrimitiveType == IFCDataPrimitiveType.Instance)
-               m_TransmissionColour = IFCColourRgb.ProcessIFCColourRgb(transmissionColour.AsInstance());
-            else if (transmissionColour.PrimitiveType == IFCDataPrimitiveType.Double)
-               m_TransmissionColourFactor = transmissionColour.AsDouble();
-
-            IFCData diffuseTransmissionColour = item.GetAttribute("DiffuseTransmissionColour");
-            if (transmissionColour.PrimitiveType == IFCDataPrimitiveType.Instance)
-               m_DiffuseTransmissionColour = IFCColourRgb.ProcessIFCColourRgb(diffuseTransmissionColour.AsInstance());
-            else if (transmissionColour.PrimitiveType == IFCDataPrimitiveType.Double)
-               m_DiffuseTransmissionColourFactor = diffuseTransmissionColour.AsDouble();
-
-            IFCData reflectionColour = item.GetAttribute("ReflectionColour");
-            if (reflectionColour.PrimitiveType == IFCDataPrimitiveType.Instance)
-               m_ReflectionColour = IFCColourRgb.ProcessIFCColourRgb(reflectionColour.AsInstance());
-            else if (reflectionColour.PrimitiveType == IFCDataPrimitiveType.Double)
-               m_ReflectionColourFactor = reflectionColour.AsDouble();
-
-            IFCData specularColour = item.GetAttribute("SpecularColour");
-            if (specularColour.PrimitiveType == IFCDataPrimitiveType.Instance)
-               m_SpecularColour = IFCColourRgb.ProcessIFCColourRgb(specularColour.AsInstance());
-            else if (specularColour.PrimitiveType == IFCDataPrimitiveType.Double)
-               m_SpecularColourFactor = specularColour.AsDouble();
-
-            IFCData specularHighlight = item.GetAttribute("SpecularHighlight");
-            if (specularHighlight.PrimitiveType == IFCDataPrimitiveType.Double)
-            {
-               try
-               {
-                  string simpleType = specularHighlight.GetSimpleType();
-                  if (string.Compare(simpleType, "IfcSpecularExponent", true) == 0)
-                     m_SpecularExponent = specularHighlight.AsDouble();
-                  else if (string.Compare(simpleType, "IfcSpecularRoughness", true) == 0)
-                     m_SpecularRoughness = specularHighlight.AsDouble();
-                  else
-                     Importer.TheLog.LogError(item.StepId, "Unknown type of specular highlight, ignoring.", false);
-               }
-               catch
-               {
-                  Importer.TheLog.LogError(item.StepId, "Unspecified type of specular highlight, ignoring.", false);
-               }
-            }
-            else if (specularHighlight.HasValue)
-            {
-               Importer.TheLog.LogError(item.StepId, "Unknown type of specular highlight, ignoring.", false);
-            }
-         }
-      }
-
-      protected IFCSurfaceStyleShading(IFCAnyHandle item)
-      {
-         Process(item);
-      }
-
-      /// <summary>
-      /// Processes an IfcSurfaceStyleShading entity handle.
-      /// </summary>
-      /// <param name="ifcSurfaceStyleShading">The IfcSurfaceStyleShading handle.</param>
-      /// <returns>The IFCSurfaceStyleShading object.</returns>
-      public static IFCSurfaceStyleShading ProcessIFCSurfaceStyleShading(IFCAnyHandle ifcSurfaceStyleShading)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcSurfaceStyleShading))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcSurfaceStyleShading);
-            return null;
-         }
-
-         IFCEntity surfaceStyleShading;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcSurfaceStyleShading.StepId, out surfaceStyleShading))
-            surfaceStyleShading = new IFCSurfaceStyleShading(ifcSurfaceStyleShading);
-         return (surfaceStyleShading as IFCSurfaceStyleShading);
-      }
    }
 }

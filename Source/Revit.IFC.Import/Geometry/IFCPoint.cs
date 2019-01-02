@@ -28,6 +28,8 @@ using Revit.IFC.Common.Enums;
 using Revit.IFC.Import.Data;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Geometry
 {
    /// <summary>
@@ -35,7 +37,7 @@ namespace Revit.IFC.Import.Geometry
    /// IfcPoint can be of type IfcCartesianPoint, IfcPointOnCurve or IfcPointOnSurface.
    /// Only IfcCartesianPoint and IfcDirection is supported currently.
    /// </summary>
-   public class IFCPoint
+   public static class IFCPoint
    {
       private enum IFCPointType
       {
@@ -65,9 +67,9 @@ namespace Revit.IFC.Import.Geometry
       }
 
       // This routine does no validity checking on the point, but does on attributes.
-      private static XYZ ProcessIFCCartesianPointInternal(IFCAnyHandle point, IFCPointType expectedCoordinates)
+      private static XYZ ProcessIFCCartesianPointInternal(this IfcCartesianPoint point, IFCPointType expectedCoordinates)
       {
-         IList<double> coordinates = IFCAnyHandleUtil.GetCoordinates(point);
+         IList<double> coordinates = point.Coordinates;
          int numCoordinates = coordinates.Count;
          if (numCoordinates < 2)
          {
@@ -103,9 +105,9 @@ namespace Revit.IFC.Import.Geometry
       /// <param name="point">The handle to the IfcPoint.</param>
       /// <returns>An XYZ value corresponding to the value in the file.  There are no transformations done in this routine.
       /// If the return is an XY point, the Z value will be set to 0.</returns>
-      public static XYZ ProcessIFCCartesianPoint(IFCAnyHandle point)
+      public static XYZ ProcessIFCCartesianPoint(this IfcCartesianPoint point)
       {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(point))
+         if(point == null)
          {
             Importer.TheLog.LogNullError(IFCEntityType.IfcCartesianPoint);
             return null;
@@ -114,26 +116,27 @@ namespace Revit.IFC.Import.Geometry
          XYZ xyz;
          int stepId = point.StepId;
          if (IFCImportFile.TheFile.XYZMap.TryGetValue(stepId, out xyz))
-            return xyz;
+           return xyz;
 
-         if (IFCAnyHandleUtil.IsTypeOf(point, IFCEntityType.IfcCartesianPoint))
-            xyz = ProcessIFCCartesianPointInternal(point, IFCPointType.DontCare);
-         else
-         {
-            Importer.TheLog.LogUnhandledSubTypeError(point, IFCEntityType.IfcCartesianPoint, false);
-            return null;
-         }
-
+         xyz = ProcessIFCCartesianPointInternal(point, IFCPointType.DontCare);
          AddToCaches(stepId, IFCEntityType.IfcCartesianPoint, xyz);
          return xyz;
       }
+      public static XYZ GetPoint(this IfcVertex vertex)
+      {
+         IfcVertexPoint vertexPoint = vertex as IfcVertexPoint;
+         if (vertexPoint != null)
+            return vertexPoint.VertexGeometry.ProcessIFCPoint();
+         return null;
+      }
 
+      
       /// <summary>
       /// Get the XYZ corresponding to the IfcCartesianPoint, scaled by the length scale.
       /// </summary>
       /// <param name="point">The IfcCartesianPoint entity handle.</param>
       /// <returns>The scaled XYZ value.</returns>
-      public static XYZ ProcessScaledLengthIFCCartesianPoint(IFCAnyHandle point)
+      public static XYZ ProcessScaledLengthIFCCartesianPoint(this IfcCartesianPoint point)
       {
          XYZ xyz = ProcessIFCCartesianPoint(point);
          if (xyz != null)
@@ -146,13 +149,13 @@ namespace Revit.IFC.Import.Geometry
       /// </summary>
       /// <param name="points">The IfcCartesianPoint entity handles.</param>
       /// <returns>The scaled XYZ values.</returns>
-      public static IList<XYZ> ProcessScaledLengthIFCCartesianPoints(IList<IFCAnyHandle> points)
+      public static IList<XYZ> ProcessScaledLengthIFCCartesianPoints(IList<IfcCartesianPoint> points)
       {
          if (points == null)
             return null;
 
          IList<XYZ> xyzs = new List<XYZ>();
-         foreach (IFCAnyHandle point in points)
+         foreach (IfcCartesianPoint point in points)
          {
             XYZ xyz = ProcessIFCCartesianPoint(point);
             if (xyz == null)
@@ -169,37 +172,23 @@ namespace Revit.IFC.Import.Geometry
       /// </summary>
       /// <param name="point">The handle to the IfcPoint.</param>
       /// <returns>A UV value corresponding to the value in the file.  There are no transformations done in this routine.</returns>
-      public static UV ProcessIFCCartesianPoint2D(IFCAnyHandle point)
+      public static UV ProcessIFCCartesianPoint2D(this IfcCartesianPoint point)
       {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(point))
+         if (point == null)
          {
             Importer.TheLog.LogNullError(IFCEntityType.IfcCartesianPoint);
             return null;
          }
-
-         XYZ xyz;
-         int stepId = point.StepId;
-         if (IFCImportFile.TheFile.XYZMap.TryGetValue(stepId, out xyz))
-            return new UV(xyz.X, xyz.Y);
-
-         if (IFCAnyHandleUtil.IsTypeOf(point, IFCEntityType.IfcCartesianPoint))
-         {
-            xyz = ProcessIFCCartesianPointInternal(point, IFCPointType.UVPoint);
-         }
-         else
-         {
-            Importer.TheLog.LogUnhandledSubTypeError(point, IFCEntityType.IfcCartesianPoint, false);
-            return null;
-         }
-
-         AddToCaches(stepId, IFCEntityType.IfcCartesianPoint, xyz);
-         return new UV(xyz.X, xyz.Y);
+         IList<double> coordinates = point.Coordinates;
+         
+         return new UV(coordinates[0], coordinates.Count < 2 ? 0 : coordinates[1]);
       }
 
-      private static XYZ ProcessIFCPointInternal(IFCAnyHandle point, IFCPointType expectedCoordinates)
+      private static XYZ ProcessIFCPointInternal(this IfcPoint point, IFCPointType expectedCoordinates)
       {
-         if (IFCAnyHandleUtil.IsTypeOf(point, IFCEntityType.IfcCartesianPoint))
-            return ProcessIFCCartesianPointInternal(point, IFCPointType.DontCare);
+         IfcCartesianPoint cartesianPoint = point as IfcCartesianPoint;
+         if(cartesianPoint != null)
+            return ProcessIFCCartesianPointInternal(cartesianPoint, expectedCoordinates);
 
          Importer.TheLog.LogUnhandledSubTypeError(point, IFCEntityType.IfcCartesianPoint, false);
          return null;
@@ -211,9 +200,9 @@ namespace Revit.IFC.Import.Geometry
       /// <param name="point">The handle to the IfcPoint.</param>
       /// <returns>An XYZ value corresponding to the value in the file.  If the IfcPoint is 2D, the Z value will be 0.
       /// There are no transformations done in this routine.</returns>
-      public static XYZ ProcessIFCPoint(IFCAnyHandle point)
+      public static XYZ ProcessIFCPoint(this IfcPoint point)
       {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(point))
+         if(point == null)
          {
             Importer.TheLog.LogNullError(IFCEntityType.IfcCartesianPoint);
             return null;
@@ -225,6 +214,7 @@ namespace Revit.IFC.Import.Geometry
             return xyz;
 
          xyz = ProcessIFCPointInternal(point, IFCPointType.DontCare);
+
          AddToCaches(stepId, IFCEntityType.IfcCartesianPoint, xyz);
          return xyz;
       }
@@ -234,9 +224,9 @@ namespace Revit.IFC.Import.Geometry
       /// </summary>
       /// <param name="point">The handle to the IfcPoint.</param>
       /// <returns>A UV value corresponding to the value in the file.  There are no transformations done in this routine.</returns>
-      public static UV ProcessIFCPoint2D(IFCAnyHandle point)
+      public static UV ProcessIFCPoint2D(this IfcPoint point)
       {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(point))
+         if(point == null)
          {
             Importer.TheLog.LogNullError(IFCEntityType.IfcCartesianPoint);
             return null;
@@ -260,9 +250,9 @@ namespace Revit.IFC.Import.Geometry
       /// </summary>
       /// <param name="point">The handle to the IfcPoint.</param>
       /// <returns>An XYZ value corresponding to the value in the file.  There are no transformations done in this routine.</returns>
-      public static XYZ ProcessIFCPoint3D(IFCAnyHandle point)
+      public static XYZ ProcessIFCPoint3D(this IfcPoint point)
       {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(point))
+         if(point == null)
          {
             Importer.TheLog.LogNullError(IFCEntityType.IfcCartesianPoint);
             return null;
@@ -278,21 +268,15 @@ namespace Revit.IFC.Import.Geometry
          return xyz;
       }
 
-      private static XYZ ProcessIFCDirectionBase(IFCAnyHandle direction, bool normalize)
+      private static XYZ ProcessIFCDirectionBase(IfcDirection direction, bool normalize)
       {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(direction))
+         if (direction == null)
          {
             Importer.TheLog.LogNullError(IFCEntityType.IfcDirection);
             return null;
          }
 
-         if (!IFCAnyHandleUtil.IsSubTypeOf(direction, IFCEntityType.IfcDirection))
-         {
-            Importer.TheLog.LogUnexpectedTypeError(direction, IFCEntityType.IfcDirection, false);
-            return null;
-         }
-
-         XYZ xyz = null;
+         XYZ xyz;
          int stepId = direction.StepId;
          if (normalize)
          {
@@ -305,7 +289,7 @@ namespace Revit.IFC.Import.Geometry
                return xyz;
          }
 
-         List<double> directionRatios = IFCAnyHandleUtil.GetAggregateDoubleAttribute<List<double>>(direction, "DirectionRatios");
+         List<double> directionRatios = direction.DirectionRatios.ToList();
          xyz = ListToXYZ(directionRatios);
          XYZ normalizedXYZ = null;
          if (xyz != null)
@@ -330,7 +314,7 @@ namespace Revit.IFC.Import.Geometry
       /// <param name="direction">The handle to the IfcDirection.</param>
       /// <returns>An XYZ value corresponding to the value in the file.  There are no transformations done in this routine.
       /// If the return is an XY point, the Z value will be set to 0.</returns>
-      public static XYZ ProcessIFCDirection(IFCAnyHandle direction)
+      public static XYZ ProcessIFCDirection(this IfcDirection direction)
       {
          return ProcessIFCDirectionBase(direction, false);
       }
@@ -341,7 +325,7 @@ namespace Revit.IFC.Import.Geometry
       /// <param name="direction">The handle to the IfcDirection.</param>
       /// <returns>An XYZ value corresponding to the value in the file.  There are no transformations done in this routine.
       /// If the return is an XY point, the Z value will be set to 0.</returns>
-      public static XYZ ProcessNormalizedIFCDirection(IFCAnyHandle direction)
+      public static XYZ ProcessNormalizedIFCDirection(this IfcDirection direction)
       {
          return ProcessIFCDirectionBase(direction, true);
       }
@@ -352,17 +336,11 @@ namespace Revit.IFC.Import.Geometry
       /// <param name="vector">The handle to the IfcVector.</param>
       /// <returns>An XYZ value corresponding to the value in the file.  There are no transformations done in this routine.
       /// If the return is an XY point, the Z value will be set to 0.</returns>
-      public static XYZ ProcessIFCVector(IFCAnyHandle vector)
+      public static XYZ ProcessIFCVector(this IfcVector vector)
       {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(vector))
+         if (vector == null)
          {
             Importer.TheLog.LogNullError(IFCEntityType.IfcVector);
-            return null;
-         }
-
-         if (!IFCAnyHandleUtil.IsSubTypeOf(vector, IFCEntityType.IfcVector))
-         {
-            Importer.TheLog.LogUnexpectedTypeError(vector, IFCEntityType.IfcVector, false);
             return null;
          }
 
@@ -371,13 +349,12 @@ namespace Revit.IFC.Import.Geometry
          if (IFCImportFile.TheFile.XYZMap.TryGetValue(stepId, out xyz))
             return xyz;
 
-         IFCAnyHandle direction = IFCImportHandleUtil.GetRequiredInstanceAttribute(vector, "Orientation", false);
+         IfcDirection direction = vector.Orientation;
          if (direction == null)
             return null;
 
-         bool found = false;
-         double magnitude = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(vector, "Magnitude", out found);
-         if (!found)
+         double magnitude = vector.Magnitude;
+         if(double.IsNaN(magnitude))
             magnitude = 1.0;
 
          XYZ directionXYZ = IFCPoint.ProcessIFCDirection(direction);

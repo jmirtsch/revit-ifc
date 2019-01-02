@@ -29,70 +29,15 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
    /// <summary>
    /// Represents an IfcRepresentationMap.
    /// </summary>
-   public class IFCRepresentationMap : IFCEntity
+   public static class IFCRepresentationMap
    {
-      Transform m_MappingOrigin = null;
-
-      IFCRepresentation m_MappedRepresentation = null;
-
-      /// <summary>
-      /// The transform associated with the mapping origin.
-      /// </summary>
-      public Transform MappingOrigin
-      {
-         get { return m_MappingOrigin; }
-         protected set { m_MappingOrigin = value; }
-      }
-
-      /// <summary>
-      /// The geometry (mapped representation).
-      /// </summary>
-      public IFCRepresentation MappedRepresentation
-      {
-         get { return m_MappedRepresentation; }
-         protected set { m_MappedRepresentation = value; }
-      }
-
-      /// <summary>
-      /// Default constructor.
-      /// </summary>
-      protected IFCRepresentationMap()
-      {
-
-      }
-
-      /// <summary>
-      /// Processes IfcRepresentationMap attributes.
-      /// </summary>
-      /// <param name="ifcRepresentationMap">The IfcRepresentationMap handle.</param>
-      protected override void Process(IFCAnyHandle ifcRepresentationMap)
-      {
-         base.Process(ifcRepresentationMap);
-
-         IFCAnyHandle mappingOrigin = IFCImportHandleUtil.GetRequiredInstanceAttribute(ifcRepresentationMap, "MappingOrigin", false);
-         if (mappingOrigin != null)
-            MappingOrigin = IFCLocation.ProcessIFCAxis2Placement(mappingOrigin);
-         else
-            MappingOrigin = Transform.Identity;
-
-         IFCAnyHandle mappedRepresentation = IFCImportHandleUtil.GetRequiredInstanceAttribute(ifcRepresentationMap, "MappedRepresentation", false);
-         if (mappedRepresentation != null)
-            MappedRepresentation = IFCRepresentation.ProcessIFCRepresentation(mappedRepresentation);
-      }
-
-      /// <summary>
-      /// Default constructor.
-      /// </summary>
-      protected IFCRepresentationMap(IFCAnyHandle representationMap)
-      {
-         Process(representationMap);
-      }
-
       /// <summary>
       /// Create geometry for a particular representation map.
       /// </summary>
@@ -100,28 +45,28 @@ namespace Revit.IFC.Import.Data
       /// <param name="lcs">Local coordinate system for the geometry, without scale.</param>
       /// <param name="scaledLcs">Local coordinate system for the geometry, including scale, potentially non-uniform.</param>
       /// <remarks>For this function, if lcs is null, we will create a library item for the geometry.</remarks>
-      public void CreateShape(IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
+      public static void CreateShapeRepresentationMap(this IfcRepresentationMap representationMap, CreateElementIfcCache cache, IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
       {
          bool creatingLibraryDefinition = (lcs == null);
 
-         if (MappedRepresentation != null)
+         if (representationMap.MappedRepresentation != null)
          {
             // Look for cached shape; if found, return.
             if (creatingLibraryDefinition)
             {
-               if (IFCImportFile.TheFile.ShapeLibrary.FindDefinitionType(Id.ToString()) != ElementId.InvalidElementId)
+               if (IFCImportFile.TheFile.ShapeLibrary.FindDefinitionType(representationMap.StepId.ToString()) != ElementId.InvalidElementId)
                   return;
             }
 
             Transform mappingTransform = null;
             if (lcs == null)
-               mappingTransform = MappingOrigin;
+               mappingTransform = representationMap.MappingOrigin.GetAxis2PlacementTransform();
             else
             {
-               if (MappingOrigin == null)
+               if (representationMap.MappingOrigin == null)
                   mappingTransform = lcs;
                else
-                  mappingTransform = lcs.Multiply(MappingOrigin);
+                  mappingTransform = lcs.Multiply(representationMap.MappingOrigin.GetAxis2PlacementTransform());
             }
 
             Transform scaledMappingTransform = null;
@@ -129,47 +74,47 @@ namespace Revit.IFC.Import.Data
                scaledMappingTransform = mappingTransform;
             else
             {
-               if (MappingOrigin == null)
+               if (representationMap.MappingOrigin == null)
                   scaledMappingTransform = scaledLcs;
                else
-                  scaledMappingTransform = scaledLcs.Multiply(MappingOrigin);
+                  scaledMappingTransform = scaledLcs.Multiply(representationMap.MappingOrigin.GetAxis2PlacementTransform());
             }
 
-            int numExistingSolids = shapeEditScope.Creator.Solids.Count;
-            int numExistingCurves = shapeEditScope.Creator.FootprintCurves.Count;
+            int numExistingSolids = shapeEditScope.Solids.Count;
+            int numExistingCurves = shapeEditScope.FootPrintCurves.Count;
 
-            MappedRepresentation.CreateShape(shapeEditScope, mappingTransform, scaledMappingTransform, guid);
+            representationMap.MappedRepresentation.CreateShape(cache, shapeEditScope, mappingTransform, scaledMappingTransform, guid);
 
             if (creatingLibraryDefinition)
             {
-               int numNewSolids = shapeEditScope.Creator.Solids.Count;
-               int numNewCurves = shapeEditScope.Creator.FootprintCurves.Count;
+               int numNewSolids = shapeEditScope.Solids.Count;
+               int numNewCurves = shapeEditScope.FootPrintCurves.Count;
 
                if ((numExistingSolids != numNewSolids) || (numExistingCurves != numNewCurves))
                {
                   IList<GeometryObject> mappedSolids = new List<GeometryObject>();
                   for (int ii = numExistingSolids; ii < numNewSolids; ii++)
                   {
-                     mappedSolids.Add(shapeEditScope.Creator.Solids[numExistingSolids].GeometryObject);
-                     shapeEditScope.Creator.Solids.RemoveAt(numExistingSolids);
+                     mappedSolids.Add(shapeEditScope.Solids[numExistingSolids].GeometryObject);
+                     shapeEditScope.Solids.RemoveAt(numExistingSolids);
                   }
 
                   IList<Curve> mappedCurves = new List<Curve>();
                   for (int ii = numExistingCurves; ii < numNewCurves; ii++)
                   {
-                     mappedCurves.Add(shapeEditScope.Creator.FootprintCurves[numExistingCurves]);
-                     shapeEditScope.Creator.FootprintCurves.RemoveAt(numExistingCurves);
+                     mappedCurves.Add(shapeEditScope.FootPrintCurves[numExistingCurves]);
+                     shapeEditScope.FootPrintCurves.RemoveAt(numExistingCurves);
                   }
-                  shapeEditScope.AddPlanViewCurves(mappedCurves, Id);
+                  shapeEditScope.AddPlaneViewCurves(mappedCurves, representationMap.StepId);
 
                   Document doc = IFCImportFile.TheFile.Document;
                   DirectShapeType directShapeType = null;
 
-                  IFCTypeProduct typeProduct = null;
-                  if (Importer.TheCache.RepMapToTypeProduct.TryGetValue(Id, out typeProduct) && typeProduct != null)
+                  if(representationMap.Represents.Count == 1)
                   {
+                     IfcTypeProduct typeProduct = representationMap.Represents[0]; 
                      ElementId directShapeTypeId = ElementId.InvalidElementId;
-                     if (Importer.TheCache.CreatedDirectShapeTypes.TryGetValue(typeProduct.Id, out directShapeTypeId))
+                     if (Importer.TheCache.CreatedDirectShapeTypes.TryGetValue(typeProduct.StepId, out directShapeTypeId))
                      {
                         directShapeType = doc.GetElement(directShapeTypeId) as DirectShapeType;
                      }
@@ -177,8 +122,8 @@ namespace Revit.IFC.Import.Data
 
                   if (directShapeType == null)
                   {
-                     string directShapeTypeName = Id.ToString();
-                     directShapeType = IFCElementUtil.CreateElementType(doc, directShapeTypeName, shapeEditScope.CategoryId, Id);
+                     string directShapeTypeName = representationMap.StepId.ToString();
+                     directShapeType = IFCElementUtil.CreateElementType(doc, directShapeTypeName, shapeEditScope.CategoryId, representationMap.StepId);
                   }
 
                   // Note that this assumes that there is only one 2D rep per DirectShapeType.
@@ -186,30 +131,12 @@ namespace Revit.IFC.Import.Data
                   if (mappedCurves.Count != 0)
                      shapeEditScope.SetPlanViewRep(directShapeType);
 
-                  IFCImportFile.TheFile.ShapeLibrary.AddDefinitionType(Id.ToString(), directShapeType.Id);
+                  IFCImportFile.TheFile.ShapeLibrary.AddDefinitionType(representationMap.StepId.ToString(), directShapeType.Id);
                }
             }
          }
       }
 
-      /// <summary>
-      /// Processes an IfcRepresentationMap object.
-      /// </summary>
-      /// <param name="ifcRepresentation">The IfcRepresentationMap handle.</param>
-      /// <returns>The IFCRepresentationMap object.</returns>
-      public static IFCRepresentationMap ProcessIFCRepresentationMap(IFCAnyHandle ifcRepresentationMap)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcRepresentationMap))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcRepresentationMap);
-            return null;
-         }
-
-         IFCEntity representationMap;
-         if (IFCImportFile.TheFile.EntityMap.TryGetValue(ifcRepresentationMap.StepId, out representationMap))
-            return (representationMap as IFCRepresentationMap);
-
-         return new IFCRepresentationMap(ifcRepresentationMap);
-      }
+     
    }
 }

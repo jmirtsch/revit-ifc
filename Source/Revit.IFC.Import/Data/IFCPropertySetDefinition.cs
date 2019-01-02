@@ -18,6 +18,7 @@
 //
 
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.IFC;
@@ -26,12 +27,14 @@ using Revit.IFC.Common.Enums;
 using Revit.IFC.Import.Properties;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
    /// <summary>
    /// Represents an IfcPropertySetDefinition.
    /// </summary>
-   public abstract class IFCPropertySetDefinition : IFCRoot
+   public static class IFCPropertySetDefinition 
    {
       static IDictionary<IFCEntityType, int> m_DoorWindowPanelCounters = new Dictionary<IFCEntityType, int>();
 
@@ -52,73 +55,6 @@ namespace Revit.IFC.Import.Data
          return nextValue;
       }
 
-      protected IFCPropertySetDefinition()
-      {
-      }
-
-      /// <summary>
-      /// Processes IfcPropertySetDefinition attributes.
-      /// </summary>
-      /// <param name="ifcRoot">The IfcPropertySetDefinition handle.</param>
-      protected IFCPropertySetDefinition(IFCAnyHandle ifcPropertySet)
-      {
-         Process(ifcPropertySet);
-      }
-
-      /// <summary>
-      /// Processes an IFCPropertySetDefinition.
-      /// </summary>
-      /// <param name="ifcPropertySetDefinition">The IfcPropertySetDefinition handle.</param>
-      protected override void Process(IFCAnyHandle ifcPropertySetDefinition)
-      {
-         base.Process(ifcPropertySetDefinition);
-      }
-
-      /// <summary>
-      /// Determines if we require the IfcRoot entity to have a name.
-      /// </summary>
-      /// <returns>Returns true if we require the IfcRoot entity to have a name.</returns>
-      protected override bool CreateNameIfNull()
-      {
-         return true;
-      }
-
-      /// <summary>
-      /// Processes an IfcPropertySetDefinition.
-      /// </summary>
-      /// <param name="ifcPropertySetDefinition">The IfcPropertySetDefinition handle.</param>
-      /// <returns>The IFCPropertySetDefinition object.</returns>
-      public static IFCPropertySetDefinition ProcessIFCPropertySetDefinition(IFCAnyHandle ifcPropertySetDefinition)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcPropertySetDefinition))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcPropertySetDefinition);
-            return null;
-         }
-
-         IFCEntity propertySet;
-         if (IFCImportFile.TheFile.EntityMap.TryGetValue(ifcPropertySetDefinition.StepId, out propertySet))
-            return (propertySet as IFCPropertySetDefinition);
-
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcPropertySetDefinition, IFCEntityType.IfcElementQuantity))
-            return IFCElementQuantity.ProcessIFCElementQuantity(ifcPropertySetDefinition);
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcPropertySetDefinition, IFCEntityType.IfcPropertySet))
-            return IFCPropertySet.ProcessIFCPropertySet(ifcPropertySetDefinition);
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcPropertySetDefinition, IFCEntityType.IfcDoorLiningProperties))
-            return IFCDoorLiningProperties.ProcessIFCDoorLiningProperties(ifcPropertySetDefinition);
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcPropertySetDefinition, IFCEntityType.IfcDoorPanelProperties))
-            return IFCDoorPanelProperties.ProcessIFCDoorPanelProperties(ifcPropertySetDefinition,
-                GetNextCounter(IFCEntityType.IfcDoorPanelProperties));
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcPropertySetDefinition, IFCEntityType.IfcWindowLiningProperties))
-            return IFCWindowLiningProperties.ProcessIFCWindowLiningProperties(ifcPropertySetDefinition);
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcPropertySetDefinition, IFCEntityType.IfcWindowPanelProperties))
-            return IFCWindowPanelProperties.ProcessIFCWindowPanelProperties(ifcPropertySetDefinition,
-                GetNextCounter(IFCEntityType.IfcWindowPanelProperties));
-
-         Importer.TheLog.LogUnhandledSubTypeError(ifcPropertySetDefinition, IFCEntityType.IfcPropertySetDefinition, false);
-         return null;
-      }
-
       /// <summary>
       /// Create a schedule for a given property set.
       /// </summary>
@@ -126,7 +62,7 @@ namespace Revit.IFC.Import.Data
       /// <param name="element">The element being created.</param>
       /// <param name="parameterGroupMap">The parameters of the element.  Cached for performance.</param>
       /// <param name="parametersCreated">The created parameters.</param>
-      protected void CreateScheduleForPropertySet(Document doc, Element element, IFCParameterSetByGroup parameterGroupMap, ISet<string> parametersCreated)
+      internal static void CreateScheduleForPropertySet(this IfcPropertySetDefinition propertySetDefinition, Document doc, Element element, IFCParameterSetByGroup parameterGroupMap, ISet<string> parametersCreated)
       {
          if (parametersCreated.Count == 0)
             return;
@@ -138,7 +74,7 @@ namespace Revit.IFC.Import.Data
          ElementId categoryId = category.Id;
          bool elementIsType = (element is ElementType);
 
-         Tuple<ElementId, bool, string> scheduleKey = new Tuple<ElementId, bool, string>(categoryId, elementIsType, Name);
+         Tuple<ElementId, bool, string> scheduleKey = new Tuple<ElementId, bool, string>(categoryId, elementIsType, propertySetDefinition.Name);
 
          ISet<string> viewScheduleNames = Importer.TheCache.ViewScheduleNames;
          IDictionary<Tuple<ElementId, bool, string>, ElementId> viewSchedules = Importer.TheCache.ViewSchedules;
@@ -157,7 +93,7 @@ namespace Revit.IFC.Import.Data
                index++;
                if (index > 1000)
                {
-                  Importer.TheLog.LogWarning(Id, "Too many property sets with the name " + scheduleKey.Item3 +
+                  Importer.TheLog.LogWarning(propertySetDefinition.StepId, "Too many property sets with the name " + scheduleKey.Item3 +
                      ", no longer creating schedules with that name.", true);
                   return;
                }
@@ -200,7 +136,7 @@ namespace Revit.IFC.Import.Data
                      // We want to filter the schedule for specifically those elements that have this property set assigned.
                      ScheduleField scheduleField = viewSchedule.Definition.AddField(sf);
                      scheduleField.IsHidden = true;
-                     ScheduleFilter filter = new ScheduleFilter(scheduleField.FieldId, ScheduleFilterType.Contains, "\"" + Name + "\"");
+                     ScheduleFilter filter = new ScheduleFilter(scheduleField.FieldId, ScheduleFilterType.Contains, "\"" + propertySetDefinition.Name + "\"");
                      viewSchedule.Definition.AddFilter(filter);
                      filtered = true;
                   }
@@ -218,8 +154,36 @@ namespace Revit.IFC.Import.Data
       /// <param name="element">The element being created.</param>
       /// <param name="parameterGroupMap">The parameters of the element.  Cached for performance.</param>
       /// <returns>The name of the property set created, if it was created, and a Boolean value if it should be added to the property set list.</returns>
-      public virtual KeyValuePair<string, bool> CreatePropertySet(Document doc, Element element, IFCParameterSetByGroup parameterGroupMap)
+      public static KeyValuePair<string, bool> CreatePropertySet(this IfcPropertySetDefinition propertySetDefinition, CreateElementIfcCache cache, Element element, IFCParameterSetByGroup parameterGroupMap)
       {
+         Document doc = cache.Document;
+         string quotedName = "\"" + propertySetDefinition.Name + "\"";
+
+         ISet<string> parametersCreated = new HashSet<string>();
+
+         IfcElementQuantity elementQuantity = propertySetDefinition as IfcElementQuantity;
+         if(elementQuantity != null)
+         {
+            foreach (IfcPhysicalSimpleQuantity quantity in elementQuantity.Quantities.Values.OfType<IfcPhysicalSimpleQuantity>())
+            {
+               quantity.Create(doc, element, parameterGroupMap, elementQuantity.Name, parametersCreated);
+            }
+
+            elementQuantity.CreateScheduleForPropertySet(doc, element, parameterGroupMap, parametersCreated);
+            return new KeyValuePair<string, bool>(quotedName, true);
+         }
+         IfcPropertySet propertySet = propertySetDefinition as IfcPropertySet;
+         if(propertySet != null)
+         {
+            foreach (IfcProperty property in propertySet.HasProperties.Values)
+            {
+               property.Create(cache, element, parameterGroupMap, propertySet.Name, parametersCreated);
+            }
+
+            propertySet.CreateScheduleForPropertySet(doc, element, parameterGroupMap, parametersCreated);
+            return new KeyValuePair<string, bool>(quotedName, true);
+         }
+
          return new KeyValuePair<string, bool>(null, false);
       }
    }

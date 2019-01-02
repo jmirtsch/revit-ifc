@@ -22,103 +22,38 @@ using Autodesk.Revit.DB.IFC;
 using Revit.IFC.Common.Utility;
 using Revit.IFC.Common.Enums;
 using Revit.IFC.Import.Utility;
+using Revit.IFC.Import.Geometry;
+
+using GeometryGym.Ifc;
 
 namespace Revit.IFC.Import.Data
 {
    /// <summary>
    /// Class that represents IfcEdge entity
    /// </summary>
-   public class IFCEdge : IFCTopologicalRepresentationItem
+   public static class IFCEdge
    {
-      private IFCVertex m_EdgeStart;
-
-      private IFCVertex m_EdgeEnd;
-
-      /// <summary>
-      /// Start point of the edge
-      /// </summary>
-      public IFCVertex EdgeStart
-      {
-         get { return m_EdgeStart; }
-         set { m_EdgeStart = value; }
-      }
-
-      /// <summary>
-      /// End point of the edge
-      /// </summary>
-      public IFCVertex EdgeEnd
-      {
-         get { return m_EdgeEnd; }
-         set { m_EdgeEnd = value; }
-      }
-
-      protected IFCEdge()
-      {
-      }
-
-      protected IFCEdge(IFCAnyHandle item)
-      {
-         Process(item);
-      }
-
-      protected override void Process(IFCAnyHandle ifcEdge)
-      {
-         base.Process(ifcEdge);
-
-         IFCAnyHandle edgeStart = IFCImportHandleUtil.GetRequiredInstanceAttribute(ifcEdge, "EdgeStart", false);
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(edgeStart))
-         {
-            Importer.TheLog.LogError(ifcEdge.StepId, "Cannot find the starting vertex", true);
-            return;
-         }
-
-         IFCAnyHandle edgeEnd = IFCImportHandleUtil.GetRequiredInstanceAttribute(ifcEdge, "EdgeEnd", false);
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(edgeEnd))
-         {
-            Importer.TheLog.LogError(ifcEdge.StepId, "Cannot find the ending vertex", true);
-            return;
-         }
-
-         EdgeStart = IFCVertex.ProcessIFCVertex(edgeStart);
-         EdgeEnd = IFCVertex.ProcessIFCVertex(edgeEnd);
-      }
-
       /// <summary>
       /// Returns the curve which defines the shape and spatial location of this edge.
       /// </summary>
       /// <returns>The curve which defines the shape and spatial location of this edge.</returns>
-      public virtual Curve GetGeometry()
+      public static Curve GetGeometry(this IfcEdge edge, bool orientation)
       {
-         if (EdgeStart == null || EdgeEnd == null)
+         IfcOrientedEdge orientedEdge = edge as IfcOrientedEdge;
+         if (orientedEdge != null)
          {
-            Importer.TheLog.LogError(Id, "Invalid edge", true);
+            // TODO in REVIT-61368: get the correct orientation of the curve achieved for straight
+            orientedEdge.EdgeElement.GetGeometry(orientedEdge.Orientation);
+         }
+         IfcVertexPoint start = edge.EdgeStart as IfcVertexPoint, end = edge.EdgeEnd as IfcVertexPoint;
+         if (start == null || end == null)
+         {
+            Importer.TheLog.LogError(edge.StepId, "Invalid edge", true);
             return null;
          }
-         return Line.CreateBound(EdgeStart.GetCoordinate(), EdgeEnd.GetCoordinate());
-      }
-
-      /// <summary>
-      /// Create an IFCEdge object from a handle of type IfcEdge
-      /// </summary>
-      /// <param name="ifcEdge">The IFC handle</param>
-      /// <returns>The IfcEdge object</returns>
-      public static IFCEdge ProcessIFCEdge(IFCAnyHandle ifcEdge)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcEdge))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcEdge);
-            return null;
-         }
-
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcEdge, IFCEntityType.IfcOrientedEdge))
-            return IFCOrientedEdge.ProcessIFCOrientedEdge(ifcEdge);
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcEdge, IFCEntityType.IfcEdgeCurve))
-            return IFCEdgeCurve.ProcessIFCEdgeCurve(ifcEdge);
-
-         IFCEntity edge;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcEdge.StepId, out edge))
-            edge = new IFCEdge(ifcEdge);
-         return (edge as IFCEdge);
+         if(orientation)
+            return Line.CreateBound(start.VertexGeometry.ProcessIFCPoint(), end.VertexGeometry.ProcessIFCPoint());
+         return Line.CreateBound(end.VertexGeometry.ProcessIFCPoint(), start.VertexGeometry.ProcessIFCPoint());
       }
    }
 }

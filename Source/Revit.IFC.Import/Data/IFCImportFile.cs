@@ -30,10 +30,10 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 using Revit.IFC.Import.Properties;
-using ICSharpCode.SharpZipLib.Zip;
-using ICSharpCode.SharpZipLib.Core;
 using System.Xml;
 using IFCImportOptions = Revit.IFC.Import.Utility.IFCImportOptions;
+
+using GeometryGym.Ifc;
 
 namespace Revit.IFC.Import.Data
 {
@@ -57,16 +57,9 @@ namespace Revit.IFC.Import.Data
 
       static string m_OverrideSchemaFileName = null;
 
-      IFCFile m_IfcFile = null;
-
-      IFCProject m_IFCProject;
-
-      // A list of entities that aren't inside of the IFCProject that should regardless be created.
-      ICollection<IFCObjectDefinition> m_OtherEntitiesToCreate = new HashSet<IFCObjectDefinition>();
+      private DatabaseIfc m_DatabaseIfc = null;
 
       IFCUnits m_IFCUnits = new IFCUnits();
-
-      IDictionary<int, IFCEntity> m_EntityMap = new Dictionary<int, IFCEntity>();
 
       IDictionary<int, Transform> m_TransformMap = new Dictionary<int, Transform>();
 
@@ -75,7 +68,7 @@ namespace Revit.IFC.Import.Data
       // Anything in this map should also be in XYZMap.  This caches normalized values useful for Transforms.
       IDictionary<int, XYZ> m_NormalizedXYZMap = new Dictionary<int, XYZ>();
 
-      IFCSchemaVersion m_SchemaVersion = IFCSchemaVersion.IFC2x3; // default
+      ReleaseVersion m_SchemaVersion = ReleaseVersion.IFC2x3; // default
 
       /// <summary>
       /// An element that keeps track of the created DirectShapeTypes, for geometry sharing.
@@ -152,6 +145,11 @@ namespace Revit.IFC.Import.Data
          get { return m_sIFCImportFile; }
       }
 
+      public DatabaseIfc DatabaseIfc
+      {
+         get { return m_DatabaseIfc; }
+      }
+
       /// <summary>
       /// Override the schema file name, incluing the path.
       /// </summary>
@@ -159,14 +157,6 @@ namespace Revit.IFC.Import.Data
       {
          get { return m_OverrideSchemaFileName; }
          set { m_OverrideSchemaFileName = value; }
-      }
-
-      /// <summary>
-      /// A map of all of the already created IFC entities.  This is necessary to prevent duplication and redundant work.
-      /// </summary>
-      public IDictionary<int, IFCEntity> EntityMap
-      {
-         get { return m_EntityMap; }
       }
 
       /// <summary>
@@ -196,26 +186,9 @@ namespace Revit.IFC.Import.Data
       }
 
       /// <summary>
-      /// The project in the file.
-      /// </summary>
-      public IFCProject IFCProject
-      {
-         get { return m_IFCProject; }
-         set { m_IFCProject = value; }
-      }
-
-      /// <summary>
-      /// A list of entities not contained in IFCProject to create.  This could include, e.g., zones.
-      /// </summary>
-      public ICollection<IFCObjectDefinition> OtherEntitiesToCreate
-      {
-         get { return m_OtherEntitiesToCreate; }
-      }
-
-      /// <summary>
       /// The schema version of the IFC file.
       /// </summary>
-      public IFCSchemaVersion SchemaVersion
+      public ReleaseVersion SchemaVersion
       {
          get { return m_SchemaVersion; }
          set { m_SchemaVersion = value; }
@@ -242,124 +215,7 @@ namespace Revit.IFC.Import.Data
       public static string TheFileName { get; protected set; }
       public static int TheBrepCounter { get; set; }
 
-      /// <summary>
-      /// Read in the IFC file specified by ifcFilePath, and report any errors.
-      /// </summary>
-      /// <param name="ifcFilePath">The IFC file name.</param>
-      /// <returns>True if the file read was successful, false otherwise.</returns>
-      private bool ProcessFile(string ifcFilePath)
-      {
-         IFCFileReadOptions readOptions = new IFCFileReadOptions();
-         readOptions.FileName = ifcFilePath;
-         readOptions.XMLConfigFileName = Path.Combine(DirectoryUtil.RevitProgramPath, "EDM\\ifcXMLconfiguration.xml");
-
-         int numErrors = 0;
-         int numWarnings = 0;
-
-         try
-         {
-            Importer.TheCache.StatusBar.Set(String.Format(Resources.IFCReadingFile, TheFileName));
-            m_IfcFile.Read(readOptions, out numErrors, out numWarnings);
-         }
-         catch (Exception ex)
-         {
-            Importer.TheLog.LogError(-1, "There was an error reading the IFC file: " + ex.Message + ".  Aborting import.", false);
-            return false;
-         }
-
-         if (numErrors > 0 || numWarnings > 0)
-         {
-            if (numErrors > 0)
-            {
-               if (numWarnings > 0)
-                  Importer.TheLog.LogError(-1, "There were " + numErrors + " errors and " + numWarnings + " reading the IFC file.  Please look at the log information at the end of this report for more information.", false);
-               else
-                  Importer.TheLog.LogError(-1, "There were " + numErrors + " errors reading the IFC file.  Please look at the log information at the end of this report for more information.", false);
-            }
-            else
-            {
-               Importer.TheLog.LogWarning(-1, "There were " + numWarnings + " warnings reading the IFC file.  Please look at the log information at the end of this report for more information.", false);
-            }
-         }
-
-         return true;
-      }
-
-      private bool PostProcessReference()
-      {
-         // Go through our list of created items and post-process any handles not processed in the first pass.
-         int count = 0;
-         ISet<IFCEntity> alreadyProcessed = new HashSet<IFCEntity>();
-         // Processing an entity may result in a new entity being processed for the first time.  We'll have to post-process it also.
-         // Post-processing should be fast, and do nothing if called multiple times, so we won't bother 
-         do
-         {
-            int total = IFCImportFile.TheFile.EntityMap.Count;
-            List<IFCEntity> currentValues = IFCImportFile.TheFile.EntityMap.Values.ToList();
-            foreach (IFCEntity entity in currentValues)
-            {
-               if (alreadyProcessed.Contains(entity))
-                  continue;
-
-               entity.PostProcess();
-               count++;
-               Importer.TheLog.ReportPostProcessedEntity(count, total);
-            }
-
-            int newTotal = IFCImportFile.TheFile.EntityMap.Values.Count;
-            if (total == newTotal)
-               break;
-
-            alreadyProcessed.UnionWith(currentValues);
-         } while (true);
-
-         return true;
-      }
-
-      /// <summary>
-      /// Top-level function that processes an IFC file for reference.
-      /// </summary>
-      /// <returns>True if the process is successful, false otherwise.</returns>
-      private bool ProcessReference()
-      {
-         InitializeOpenTransaction("Open IFC Reference File");
-
-         //If there is more than one project, we will be ignoring all but the first one.
-         IList<IFCAnyHandle> projects = IFCImportFile.TheFile.GetInstances(IFCEntityType.IfcProject, false);
-         if (projects.Count == 0)
-         {
-            Importer.TheLog.LogError(-1, "There were no IfcProjects found in the file.  Aborting import.", false);
-            return false;
-         }
-
-         IFCProject.ProcessIFCProject(projects[0]);
-
-         // The IFC toolkit relies on the IFC schema definition to read in the file. The schema definition has entities that have data fields,
-         // and INVERSE relationships. Unfortunately, the standard IFC 2x3 schema has a "bug" where one of the inverse relationships is missing. 
-         // Normally we don't care all that much, but now we do. So if we don't allow using this inverse (because if we did, it would just constantly 
-         // throw exceptions), we need another way to get the zones. This is the way.
-         // We are also using this to find IfcSystems that don't have the optional IfcRelServicesBuildings set.
-         if (!IFCImportFile.TheFile.Options.AllowUseHasAssignments)
-         {
-            IList<IFCAnyHandle> zones = IFCImportFile.TheFile.GetInstances(IFCEntityType.IfcZone, false);
-            foreach (IFCAnyHandle zone in zones)
-            {
-               IFCZone ifcZone = IFCZone.ProcessIFCZone(zone);
-               if (ifcZone != null)
-                  OtherEntitiesToCreate.Add(ifcZone);
-            }
-
-            IList<IFCAnyHandle> systems = IFCImportFile.TheFile.GetInstances(IFCEntityType.IfcSystem, false);
-            foreach (IFCAnyHandle system in systems)
-            {
-               IFCSystem ifcSystem = IFCSystem.ProcessIFCSystem(system);
-               if (ifcSystem != null)
-                  OtherEntitiesToCreate.Add(ifcSystem);
-            }
-         }
-
-         return PostProcessReference();
-      }
+      
 
       private bool Process(string ifcFilePath, IFCImportOptions options, Document doc)
       {
@@ -368,9 +224,8 @@ namespace Revit.IFC.Import.Data
 
          try
          {
-            IFCSchemaVersion schemaVersion;
-            m_IfcFile = CreateIFCFile(ifcFilePath, out schemaVersion);
-            SchemaVersion = schemaVersion;
+            m_DatabaseIfc = new DatabaseIfc(ifcFilePath);
+            SchemaVersion = m_DatabaseIfc.Release;
          }
          catch (Exception ex)
          {
@@ -385,17 +240,13 @@ namespace Revit.IFC.Import.Data
          ShapeLibrary = DirectShapeLibrary.GetDirectShapeLibrary(doc);
          ShapeLibrary.Reset();
 
-         bool readFile = ProcessFile(ifcFilePath);
-         if (!readFile)
+         IfcProject project = DatabaseIfc.Project;
+         if (project == null)
             return false;
 
          m_Transaction = new Transaction(doc);
-         switch (options.Intent)
-         {
-            case IFCImportIntent.Reference:
-               return ProcessReference();
-         }
-
+         if(options.Intent == IFCImportIntent.Reference)
+            InitializeOpenTransaction("Open IFC Reference File");
          return true;
       }
 
@@ -473,8 +324,8 @@ namespace Revit.IFC.Import.Data
       /// </summary>
       public void Close()
       {
-         if (m_IfcFile != null)
-            m_IfcFile.Close();
+         if (DatabaseIfc != null)
+            m_DatabaseIfc.Dispose();
          m_sIFCImportFile = null;
       }
 
@@ -1031,68 +882,11 @@ namespace Revit.IFC.Import.Data
       /// <returns>The extracted file path.</returns>
       static string ExtractZipFile(string archiveFilenameIn, string password, string outFolder)
       {
-         ZipFile zf = null;
-         String fullZipToPath = null;
-         try
-         {
-            FileStream fs = File.OpenRead(archiveFilenameIn);
-            zf = new ZipFile(fs);
-            if (!String.IsNullOrEmpty(password))
-            {
-               zf.Password = password;		// AES encrypted entries are handled automatically
-            }
-            foreach (ZipEntry zipEntry in zf)
-            {
-               if (!zipEntry.IsFile)
-               {
-                  continue;			// Ignore directories
-               }
-               string entryFileName = zipEntry.Name;
-               // to remove the folder from the entry:- entryFileName = Path.GetFileName(entryFileName);
-               // Optionally match entrynames against a selection list here to skip as desired.
-               // The unpacked length is available in the zipEntry.Size property.
-
-               byte[] buffer = new byte[4096];		// 4K is optimum
-               Stream zipStream = zf.GetInputStream(zipEntry);
-
-               // Manipulate the output filename here as desired.
-               fullZipToPath = Path.Combine(outFolder, entryFileName);
-               string directoryName = Path.GetDirectoryName(fullZipToPath);
-               if (directoryName.Length > 0)
-                  Directory.CreateDirectory(directoryName);
-
-               // Unzip file in buffered chunks. This is just as fast as unpacking to a buffer the full size
-               // of the file, but does not waste memory.
-               // The "using" will close the stream even if an exception occurs.
-               using (FileStream streamWriter = File.Create(fullZipToPath))
-               {
-                  StreamUtils.Copy(zipStream, streamWriter, buffer);
-               }
-
-               break; //we expect only one IFC file
-            }
-         }
-         finally
-         {
-            if (zf != null)
-            {
-               zf.IsStreamOwner = true; // Makes close also shut the underlying stream
-               zf.Close(); // Ensure we release resources
-            }
-         }
-
-         return fullZipToPath;
+         Directory.CreateDirectory(outFolder);
+         System.IO.Compression.ZipFile.ExtractToDirectory(archiveFilenameIn, outFolder);
+         System.IO.Compression.ZipArchive zipArchive = System.IO.Compression.ZipFile.OpenRead(archiveFilenameIn);
+         return Path.Combine(outFolder, zipArchive.Entries.First().FullName);
       }
 
-      /// <summary>
-      /// Gets instances of an entity type from an IFC file.
-      /// </summary>
-      /// <param name="type">The type.</param>
-      /// <param name="includeSubTypes">True to retrieve instances of sub types.</param>
-      /// <returns>The instance handles.</returns>
-      public IList<IFCAnyHandle> GetInstances(IFCEntityType type, bool includeSubTypes)
-      {
-         return m_IfcFile.GetInstances(IFCAnyHandleUtil.GetIFCEntityTypeName(type), includeSubTypes);
-      }
    }
 }

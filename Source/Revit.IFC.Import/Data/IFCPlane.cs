@@ -29,69 +29,18 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
    /// <summary>
    /// Class that represents IFCPlane entity
    /// </summary>
-   public class IFCPlane : IFCElementarySurface
+   public static class IFCPlane
    {
-      Plane m_Plane = null;
-
-      public Plane Plane
+      public static Plane Plane(this IfcPlane plane)
       {
-         get { return m_Plane; }
-         protected set { m_Plane = value; }
-      }
-
-      protected IFCPlane()
-      {
-      }
-
-      override protected void Process(IFCAnyHandle ifcPlane)
-      {
-         base.Process(ifcPlane);
-      }
-
-      protected IFCPlane(IFCAnyHandle ifcPlane)
-      {
-         Process(ifcPlane);
-
-         m_Plane = Plane.Create(new Frame(Position.Origin, Position.BasisX, Position.BasisY, Position.BasisZ));
-      }
-
-      /// <summary>
-      /// Create an IFCPlane object from a handle of type ifcPlane.
-      /// </summary>
-      /// <param name="ifcPlane">The IFC handle.</param>
-      /// <returns>The IFCPlane object.</returns>
-      public static IFCPlane ProcessIFCPlane(IFCAnyHandle ifcPlane)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcPlane))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcPlane);
-            return null;
-         }
-
-         IFCEntity plane;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcPlane.StepId, out plane))
-            plane = new IFCPlane(ifcPlane);
-
-         return plane as IFCPlane;
-      }
-
-      /// <summary>
-      /// Returns the surface which defines the internal shape of the face
-      /// </summary>
-      /// <param name="lcs">The local coordinate system for the surface.  Can be null.</param>
-      /// <returns>The surface which defines the internal shape of the face</returns>
-      public override Surface GetSurface(Transform lcs)
-      {
-         if (lcs == null || Plane == null)
-            return Plane;
-
-         // Make a new copy of the plane.
-         return Plane.CreateByNormalAndOrigin(lcs.OfVector(Plane.Normal), lcs.OfPoint(Plane.Origin));
+         return plane.Position.GetPlane();
       }
    }
 }

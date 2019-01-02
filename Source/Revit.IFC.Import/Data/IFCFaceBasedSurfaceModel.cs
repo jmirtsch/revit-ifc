@@ -29,29 +29,12 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
-   public class IFCFaceBasedSurfaceModel : IFCRepresentationItem
+   public static class IFCFaceBasedSurfaceModel
    {
-      ISet<IFCConnectedFaceSet> m_Shells = null;
-
-      /// <summary>
-      /// The shells of the surface model.
-      /// </summary>
-      public ISet<IFCConnectedFaceSet> Shells
-      {
-         get
-         {
-            if (m_Shells == null)
-               m_Shells = new HashSet<IFCConnectedFaceSet>();
-            return m_Shells;
-         }
-      }
-
-      protected IFCFaceBasedSurfaceModel()
-      {
-      }
-
       /// <summary>
       /// Return geometry for a particular representation item.
       /// </summary>
@@ -61,9 +44,10 @@ namespace Revit.IFC.Import.Data
       /// <param name="guid">The guid of an element for which represntation is being created.</param>
       /// <returns>The created geometry.</returns>
       /// <remarks>As this doesn't inherit from IfcSolidModel, this is a non-virtual CreateGeometry function.</remarks>
-      protected IList<GeometryObject> CreateGeometry(IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
+      internal static IList<GeometryObject> CreateGeometryFaceBasedSurfaceModel(this IfcFaceBasedSurfaceModel faceBasedSurfaceModel, CreateElementIfcCache cache, IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
       {
-         if (Shells.Count == 0)
+         IList<IfcConnectedFaceSet> shells = faceBasedSurfaceModel.FbsmFaces;
+         if (shells.Count == 0)
             return null;
 
          IList<GeometryObject> geomObjs = null;
@@ -73,8 +57,8 @@ namespace Revit.IFC.Import.Data
             TessellatedShapeBuilderScope tsBuilderScope = bs as TessellatedShapeBuilderScope;
             tsBuilderScope.StartCollectingFaceSet();
 
-            foreach (IFCConnectedFaceSet faceSet in Shells)
-               faceSet.CreateShape(shapeEditScope, lcs, scaledLcs, guid);
+            foreach (IfcConnectedFaceSet faceSet in shells)
+               faceSet.CreateShapeConnectedFaceSet(cache, shapeEditScope, lcs, scaledLcs, guid, true);
 
             geomObjs = tsBuilderScope.CreateGeometry(guid);
          }
@@ -84,22 +68,6 @@ namespace Revit.IFC.Import.Data
          return geomObjs;
       }
 
-      override protected void Process(IFCAnyHandle ifcFaceBasedSurfaceModel)
-      {
-         base.Process(ifcFaceBasedSurfaceModel);
-
-         ISet<IFCAnyHandle> ifcShells = IFCAnyHandleUtil.GetAggregateInstanceAttribute<HashSet<IFCAnyHandle>>(ifcFaceBasedSurfaceModel, "FbsmFaces");
-         foreach (IFCAnyHandle ifcShell in ifcShells)
-         {
-            IFCConnectedFaceSet shell = IFCConnectedFaceSet.ProcessIFCConnectedFaceSet(ifcShell);
-            if (shell != null)
-            {
-               shell.AllowInvalidFace = true;
-               Shells.Add(shell);
-            }
-         }
-      }
-
       /// <summary>
       /// Create geometry for a particular representation item.
       /// </summary>
@@ -107,47 +75,17 @@ namespace Revit.IFC.Import.Data
       /// <param name="lcs">Local coordinate system for the geometry, without scale.</param>
       /// <param name="scaledLcs">Local coordinate system for the geometry, including scale, potentially non-uniform.</param>
       /// <param name="guid">The guid of an element for which represntation is being created.</param>
-      protected override void CreateShapeInternal(IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
+      internal static void CreateShapeFaceBasedSurfaceModel(this IfcFaceBasedSurfaceModel faceBasedSurfaceModel, CreateElementIfcCache cache, IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
       {
-         base.CreateShapeInternal(shapeEditScope, lcs, scaledLcs, guid);
-
-         // Ignoring Inner shells for now.
-         if (Shells.Count != 0)
+         // This isn't an inherited function; see description for more details.
+         IList<GeometryObject> createdGeometries = faceBasedSurfaceModel.CreateGeometryFaceBasedSurfaceModel(cache, shapeEditScope, lcs, scaledLcs, guid);
+         if (createdGeometries != null)
          {
-            // This isn't an inherited function; see description for more details.
-            IList<GeometryObject> createdGeometries = CreateGeometry(shapeEditScope, lcs, scaledLcs, guid);
-            if (createdGeometries != null)
+            foreach (GeometryObject createdGeometry in createdGeometries)
             {
-               foreach (GeometryObject createdGeometry in createdGeometries)
-               {
-                  shapeEditScope.AddGeometry(IFCSolidInfo.Create(Id, createdGeometry));
-               }
+               shapeEditScope.Solids.Add(IFCSolidInfo.Create(faceBasedSurfaceModel.StepId, createdGeometry));
             }
          }
-      }
-
-      protected IFCFaceBasedSurfaceModel(IFCAnyHandle item)
-      {
-         Process(item);
-      }
-
-      /// <summary>
-      /// Create an IFCFaceBasedSurfaceModel object from a handle of type IfcFaceBasedSurfaceModel.
-      /// </summary>
-      /// <param name="ifcFaceBasedSurfaceModel">The IFC handle.</param>
-      /// <returns>The IFCFaceBasedSurfaceModel object.</returns>
-      public static IFCFaceBasedSurfaceModel ProcessIFCFaceBasedSurfaceModel(IFCAnyHandle ifcFaceBasedSurfaceModel)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcFaceBasedSurfaceModel))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcFaceBasedSurfaceModel);
-            return null;
-         }
-
-         IFCEntity faceBasedSurfaceModel;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcFaceBasedSurfaceModel.StepId, out faceBasedSurfaceModel))
-            faceBasedSurfaceModel = new IFCFaceBasedSurfaceModel(ifcFaceBasedSurfaceModel);
-         return (faceBasedSurfaceModel as IFCFaceBasedSurfaceModel);
       }
    }
 }

@@ -29,98 +29,43 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
-   public class IFCPolyLoop : IFCLoop
+   public static class IFCPolyLoop
    {
-      IList<XYZ> m_Polygon = null;
-
-      /// <summary>
-      /// The XYZ list of scaled points for the polygon.
-      /// </summary>
-      public IList<XYZ> Polygon
+      public static IList<XYZ> Vertex(this IfcPolyloop polyLoop)
       {
-         get
-         {
-            if (m_Polygon == null)
-               m_Polygon = new List<XYZ>();
-            return m_Polygon;
-         }
-         protected set { m_Polygon = value; }
-      }
+         IList<IfcCartesianPoint> polygon = polyLoop.Polygon;
 
-      protected IFCPolyLoop()
-      {
-      }
+         if (polygon == null)
+            return null; // TODO: WARN
 
-      override protected void Process(IFCAnyHandle ifcPolyLoop)
-      {
-         base.Process(ifcPolyLoop);
+         IList<XYZ> points = IFCPoint.ProcessScaledLengthIFCCartesianPoints(polygon);
 
-         List<IFCAnyHandle> ifcPolygon =
-             IFCAnyHandleUtil.GetAggregateInstanceAttribute<List<IFCAnyHandle>>(ifcPolyLoop, "Polygon");
-
-         if (ifcPolygon == null)
-            return; // TODO: WARN
-
-         Polygon = IFCPoint.ProcessScaledLengthIFCCartesianPoints(ifcPolygon);
-
-         int numVertices = Polygon.Count;
+         int numVertices = points.Count;
          if (numVertices > 1)
          {
-            if (Polygon[0].IsAlmostEqualTo(Polygon[numVertices - 1]))
+            if (points[0].IsAlmostEqualTo(points[numVertices - 1]))
             {
                // LOG: Warning: #: First and last points are almost identical, removing extra point.
-               Polygon.RemoveAt(numVertices - 1);
+               points.RemoveAt(numVertices - 1);
                numVertices--;
             }
          }
 
          if (numVertices < 3)
-            throw new InvalidOperationException("#" + ifcPolyLoop.StepId + ": Polygon attribute has only " + numVertices + " vertices, 3 expected.");
+            throw new InvalidOperationException("#" + polyLoop.StepId + ": Polygon attribute has only " + numVertices + " vertices, 3 expected.");
+         return points;
       }
-
-      override protected CurveLoop GenerateLoop()
+      public static CurveLoop GetCurveLoop(this IfcPolyloop polyLoop)
       {
-         IList<XYZ> polygon = Polygon;
-         if (polygon == null)
-            throw new InvalidOperationException("#" + Id + ": missing polygon, ignoring.");
-
-         int numVertices = Polygon.Count;
-         if (numVertices < 3)
-            throw new InvalidOperationException("#" + Id + ": Polygon attribute has only " + numVertices + " vertices, 3 expected.");
-
-         return IFCGeometryUtil.CreatePolyCurveLoop(polygon, null, Id, true);
-      }
-
-      override protected IList<XYZ> GenerateLoopVertices()
-      {
-         return Polygon;
-      }
-
-      protected IFCPolyLoop(IFCAnyHandle ifcPolyLoop)
-      {
-         Process(ifcPolyLoop);
-      }
-
-      /// <summary>
-      /// Create an IFCPolyLoop object from a handle of type IfcPolyLoop.
-      /// </summary>
-      /// <param name="ifcPolyLoop">The IFC handle.</param>
-      /// <returns>The IFCPolyLoop object.</returns>
-      public static IFCPolyLoop ProcessIFCPolyLoop(IFCAnyHandle ifcPolyLoop)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcPolyLoop))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcPolyLoop);
+         IList<XYZ> points = polyLoop.Vertex();
+         if (points == null)
             return null;
-         }
+         return IFCGeometryUtil.CreatePolyCurveLoop(points, null, polyLoop.StepId, true);
 
-         IFCEntity polyLoop;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcPolyLoop.StepId, out polyLoop))
-            polyLoop = new IFCPolyLoop(ifcPolyLoop);
-
-         return (polyLoop as IFCPolyLoop);
       }
    }
 }

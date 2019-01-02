@@ -17,49 +17,44 @@
 // Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 //
 
+using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.IFC;
 using Revit.IFC.Common.Utility;
 using Revit.IFC.Common.Enums;
 using Revit.IFC.Import.Enums;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
-   /// <summary>
-   /// Class that represents IFCBoundedCurve entity
-   /// </summary>
-   public abstract class IFCBoundedCurve : IFCCurve
+   public static class IFCBoundedCurve
    {
-      protected IFCBoundedCurve()
+      public static Curve Curve(this IfcBoundedCurve ifcBoundedCurve)
       {
-      }
-
-      protected IFCBoundedCurve(IFCAnyHandle bSplineCurve)
-      {
-         Process(bSplineCurve);
-      }
-
-      protected override void Process(IFCAnyHandle ifcCurve)
-      {
-         base.Process(ifcCurve);
-      }
-
-      public static IFCBoundedCurve ProcessIFCBoundedCurve(IFCAnyHandle ifcBoundedCurve)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcBoundedCurve))
+         if (ifcBoundedCurve == null)
          {
             Importer.TheLog.LogNullError(IFCEntityType.IfcBoundedCurve);
             return null;
          }
-         if (IFCImportFile.TheFile.SchemaVersion > IFCSchemaVersion.IFC2x && IFCAnyHandleUtil.IsSubTypeOf(ifcBoundedCurve, IFCEntityType.IfcBSplineCurve))
-            return IFCBSplineCurve.ProcessIFCBSplineCurve(ifcBoundedCurve);
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcBoundedCurve, IFCEntityType.IfcCompositeCurve))
-            return IFCCompositeCurve.ProcessIFCCompositeCurve(ifcBoundedCurve);
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcBoundedCurve, IFCEntityType.IfcPolyline))
-            return IFCPolyline.ProcessIFCPolyline(ifcBoundedCurve);
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcBoundedCurve, IFCEntityType.IfcTrimmedCurve))
-            return IFCTrimmedCurve.ProcessIFCTrimmedCurve(ifcBoundedCurve);
-         if (IFCImportFile.TheFile.SchemaVersion > IFCSchemaVersion.IFC4 && IFCAnyHandleUtil.IsSubTypeOf(ifcBoundedCurve, IFCEntityType.IfcIndexedPolyCurve))
-            return IFCIndexedPolyCurve.ProcessIFCIndexedPolyCurve(ifcBoundedCurve);
+         IfcBSplineCurve bSplineCurve = ifcBoundedCurve as IfcBSplineCurve;
+         if(bSplineCurve != null)
+         {
+
+         }
+         IfcCompositeCurve compositeCurve = ifcBoundedCurve as IfcCompositeCurve;
+         if(compositeCurve != null)
+            return compositeCurve.CompositeCurve();
+         IfcPolyline polyline = ifcBoundedCurve as IfcPolyline;
+         if(polyline != null)
+            return polyline.PolylineCurve();
+         IfcTrimmedCurve trimmedCurve = ifcBoundedCurve as IfcTrimmedCurve;
+         if (trimmedCurve != null)
+            return trimmedCurve.CurveTrimmedCurve();
+         IfcIndexedPolyCurve indexedPolyCurve = ifcBoundedCurve as IfcIndexedPolyCurve;
+         if(indexedPolyCurve != null)
+         {
+           // return indexedPolyCurve.Curve()
+         }
 
          Importer.TheLog.LogUnhandledSubTypeError(ifcBoundedCurve, IFCEntityType.IfcBoundedCurve, true);
          return null;

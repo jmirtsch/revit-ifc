@@ -29,74 +29,12 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
-   public class IFCGeometricSet : IFCRepresentationItem
+   public static class IFCGeometricSet
    {
-      IList<IFCCurve> m_Curves = null;
-
-      /// <summary>
-      /// Get the Curve representation of IFCCurve.  It could be null.
-      /// </summary>
-      public IList<IFCCurve> Curves
-      {
-         get
-         {
-            if (m_Curves == null)
-               m_Curves = new List<IFCCurve>();
-            return m_Curves;
-         }
-      }
-
-      protected IFCGeometricSet()
-      {
-      }
-
-      override protected void Process(IFCAnyHandle ifcGeometricSet)
-      {
-         base.Process(ifcGeometricSet);
-
-         IList<IFCAnyHandle> elements = IFCAnyHandleUtil.GetAggregateInstanceAttribute<List<IFCAnyHandle>>(ifcGeometricSet, "Elements");
-         if (elements != null)
-         {
-            foreach (IFCAnyHandle element in elements)
-            {
-               if (IFCAnyHandleUtil.IsSubTypeOf(element, IFCEntityType.IfcCurve))
-               {
-                  IFCCurve curve = IFCCurve.ProcessIFCCurve(element);
-                  if (curve != null)
-                     Curves.Add(curve);
-               }
-               else
-                  Importer.TheLog.LogError(Id, "Unhandled entity type in IfcGeometricSet: " + IFCAnyHandleUtil.GetEntityType(element).ToString(), false);
-            }
-         }
-      }
-
-      protected IFCGeometricSet(IFCAnyHandle geometricSet)
-      {
-         Process(geometricSet);
-      }
-
-      /// <summary>
-      /// Create an IFCGeometricSet object from a handle of type IfcGeometricSet.
-      /// </summary>
-      /// <param name="ifcGeometricSet">The IFC handle.</param>
-      /// <returns>The IFCGeometricSet object.</returns>
-      public static IFCGeometricSet ProcessIFCGeometricSet(IFCAnyHandle ifcGeometricSet)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcGeometricSet))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcGeometricSet);
-            return null;
-         }
-
-         IFCEntity geometricSet;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcGeometricSet.StepId, out geometricSet))
-            geometricSet = new IFCGeometricSet(ifcGeometricSet);
-         return (geometricSet as IFCGeometricSet);
-      }
-
       /// <summary>
       /// Create geometry for a particular representation item, and add to scope.
       /// </summary>
@@ -105,13 +43,13 @@ namespace Revit.IFC.Import.Data
       /// <param name="scaledLcs">Local coordinate system for the geometry, including scale, potentially non-uniform.</param>
       /// <param name="guid">The guid of an element for which represntation is being created.</param>
       /// <remarks>This currently assumes that we are creating plan view curves.</remarks>
-      protected override void CreateShapeInternal(IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
+      internal static void CreateShapeGeometricSet(this IfcGeometricSet geometricSet, CreateElementIfcCache cache, IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
       {
-         base.CreateShapeInternal(shapeEditScope, lcs, scaledLcs, guid);
+         List<IfcCurve> curves = geometricSet.Elements.OfType<IfcCurve>().ToList();
 
-         foreach (IFCCurve curve in Curves)
+         foreach (IfcCurve curve in curves)
          {
-            curve.CreateShape(shapeEditScope, lcs, scaledLcs, guid);
+            curve.CreateShapeCurve(cache, shapeEditScope, lcs, scaledLcs, guid);
          }
       }
    }

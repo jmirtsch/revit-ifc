@@ -28,22 +28,29 @@ using Revit.IFC.Common.Enums;
 using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
-   public class IFCProfileDef : IFCEntity
+   public class IFCProfileDef
    {
       private string m_ProfileName = null;
 
-      private IFCProfileType m_ProfileType;
+      private IfcProfileTypeEnum m_ProfileType;
 
       protected IFCProfileDef()
       {
+      }
+      protected IFCProfileDef(IfcProfileDef profileDef)
+      {
+         ProfileType = profileDef.ProfileType;
+         ProfileName = profileDef.ProfileName;
       }
 
       /// <summary>
       /// Get the type of the profile.
       /// </summary>
-      public IFCProfileType ProfileType
+      public IfcProfileTypeEnum ProfileType
       {
          get { return m_ProfileType; }
          protected set { m_ProfileType = value; }
@@ -56,125 +63,6 @@ namespace Revit.IFC.Import.Data
       {
          get { return m_ProfileName; }
          protected set { m_ProfileName = value; }
-      }
-
-      override protected void Process(IFCAnyHandle profileDef)
-      {
-         base.Process(profileDef);
-
-         ProfileType = IFCEnums.GetSafeEnumerationAttribute<IFCProfileType>(profileDef, "ProfileType", IFCProfileType.Area);
-
-         ProfileName = IFCAnyHandleUtil.GetStringAttribute(profileDef, "ProfileName");
-      }
-
-      /// <summary>
-      /// Create an IFCProfileDef object from a handle of type IfcProfileDef.
-      /// </summary>
-      /// <param name="ifcProfileDef">The IFC handle.</param>
-      /// <returns>The IFCProfileDef object.</returns>
-      public static IFCProfileDef ProcessIFCProfileDef(IFCAnyHandle ifcProfileDef)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcProfileDef))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcProfileDef);
-            return null;
-         }
-
-         IFCEntity profileDef;
-         if (IFCImportFile.TheFile.EntityMap.TryGetValue(ifcProfileDef.StepId, out profileDef))
-            return (profileDef as IFCProfileDef);
-
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcProfileDef, IFCEntityType.IfcCompositeProfileDef))
-            return IFCCompositeProfile.ProcessIFCCompositeProfile(ifcProfileDef);
-
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcProfileDef, IFCEntityType.IfcDerivedProfileDef))
-            return IFCDerivedProfileDef.ProcessIFCDerivedProfileDef(ifcProfileDef);
-
-         //if (IFCAnyHandleUtil.IsSubTypeOf(ifcProfileDef, IFCEntityType.IfcArbitraryOpenProfileDef))
-         //if (IFCAnyHandleUtil.IsSubTypeOf(ifcProfileDef, IFCEntityType.IfcArbitraryClosedProfileDef))
-         // IFC2x files don't have IfcParameterizedProfileDef, so we won't check the type. 
-         // If profileDef is the wrong entity type, it will fail in ProcessIFCParameterizedProfileDef.
-         return IFCSimpleProfile.ProcessIFCSimpleProfile(ifcProfileDef);
-      }
-   }
-
-   /// <summary>
-   /// Provides methods to process IfcProfileDef and its subclasses.
-   /// </summary>
-   public class IFCCompositeProfile : IFCProfileDef
-   {
-      private string m_CompositeProfileDefLabel = null;
-
-      private IList<IFCProfileDef> m_Profiles = null;
-
-      /// <summary>
-      /// Default constructor.
-      /// </summary>
-      protected IFCCompositeProfile()
-      {
-
-      }
-
-      protected override void Process(IFCAnyHandle profileDef)
-      {
-         base.Process(profileDef);
-
-         CompositeProfileDefLabel = IFCAnyHandleUtil.GetStringAttribute(profileDef, "Label");
-
-         IList<IFCAnyHandle> profileHnds = IFCAnyHandleUtil.GetAggregateInstanceAttribute<List<IFCAnyHandle>>(profileDef, "Profiles");
-         foreach (IFCAnyHandle profileHnd in profileHnds)
-         {
-            IFCProfileDef subProfile = IFCProfileDef.ProcessIFCProfileDef(profileHnd);
-            if (subProfile != null)
-               Profiles.Add(subProfile);
-         }
-      }
-
-      protected IFCCompositeProfile(IFCAnyHandle profileDef)
-      {
-         Process(profileDef);
-      }
-
-      /// <summary>
-      /// Create an IFCCompositeProfile object from a handle of type IfcCompositeProfileDef.
-      /// </summary>
-      /// <param name="ifcProfileDef">The IFC handle.</param>
-      /// <returns>The IFCCompositeProfile object.</returns>
-      public static IFCCompositeProfile ProcessIFCCompositeProfile(IFCAnyHandle ifcProfileDef)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcProfileDef))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcCompositeProfileDef);
-            return null;
-         }
-
-         IFCEntity profileDef;
-         if (IFCImportFile.TheFile.EntityMap.TryGetValue(ifcProfileDef.StepId, out profileDef))
-            return (profileDef as IFCCompositeProfile);
-
-         return new IFCCompositeProfile(ifcProfileDef);
-      }
-
-      /// <summary>
-      /// Get the label for an IfcCompositeProfileDef
-      /// </summary>
-      public string CompositeProfileDefLabel
-      {
-         get { return m_CompositeProfileDefLabel; }
-         protected set { m_CompositeProfileDefLabel = value; }
-      }
-
-      /// <summary>
-      /// Get the list of contained profiles.
-      /// </summary>
-      public IList<IFCProfileDef> Profiles
-      {
-         get
-         {
-            if (m_Profiles == null)
-               m_Profiles = new List<IFCProfileDef>();
-            return m_Profiles;
-         }
       }
    }
 
@@ -244,9 +132,11 @@ namespace Revit.IFC.Import.Data
          return curveLoop;
       }
 
-      private void ProcessIFCRoundedRectangleProfileDef(IFCAnyHandle profileDef,
-          double xDimVal, double yDimVal, double roundedRadiusVal)
+      internal IFCParameterizedProfile(IfcRectangleProfileDef profileDef)
+         : base(profileDef)
       {
+         Position = profileDef.Position.GetAxis2Placement2DTransform();
+         double xDimVal = IFCUnitUtil.ScaleLength(profileDef.XDim), yDimVal = IFCUnitUtil.ScaleLength(profileDef.YDim);
          XYZ[] corners = new XYZ[4] {
                 new XYZ( -xDimVal/2.0, -yDimVal/2.0, 0.0 ),
                 new XYZ( xDimVal/2.0, -yDimVal/2.0, 0.0 ),
@@ -254,108 +144,64 @@ namespace Revit.IFC.Import.Data
                 new XYZ( -xDimVal/2.0, yDimVal/2.0, 0.0 )
             };
 
-         OuterCurve = CreateFilletedRectangleCurveLoop(corners, roundedRadiusVal);
-      }
-
-      private void ProcessIFCRectangleHollowProfileDef(IFCAnyHandle profileDef,
-          double xDimVal, double yDimVal)
-      {
-         XYZ[] corners = new XYZ[4] {
-                new XYZ( -xDimVal/2.0, -yDimVal/2.0, 0.0 ),
-                new XYZ( xDimVal/2.0, -yDimVal/2.0, 0.0 ),
-                new XYZ( xDimVal/2.0, yDimVal/2.0, 0.0 ),
-                new XYZ( -xDimVal/2.0, yDimVal/2.0, 0.0 )
-            };
-
-         double outerFilletRadius = IFCImportHandleUtil.GetOptionalScaledLengthAttribute(profileDef, "OuterFilletRadius", 0.0);
-         if ((outerFilletRadius > MathUtil.Eps()) && (outerFilletRadius < ((Math.Min(xDimVal, yDimVal) / 2.0) - MathUtil.Eps())))
+         double outerFilletRadius = 0;
+         IfcRectangleHollowProfileDef rectangleHollowProfileDef = profileDef as IfcRectangleHollowProfileDef;
+         if (rectangleHollowProfileDef != null)
+            outerFilletRadius = IFCUnitUtil.ScaleLength(rectangleHollowProfileDef.OuterFilletRadius);
+         else
+         { 
+            IfcRoundedRectangleProfileDef roundedRectangleProfileDef = profileDef as IfcRoundedRectangleProfileDef;
+            if (roundedRectangleProfileDef != null)
+               outerFilletRadius = IFCUnitUtil.ScaleLength(roundedRectangleProfileDef.RoundingRadius);
+         }
+         if (outerFilletRadius > MathUtil.Eps() && !double.IsNaN(outerFilletRadius) && (outerFilletRadius < ((Math.Min(xDimVal, yDimVal) / 2.0) - MathUtil.Eps())))
             OuterCurve = CreateFilletedRectangleCurveLoop(corners, outerFilletRadius);
 
          if (OuterCurve == null)
             OuterCurve = CreatePolyCurveLoop(corners);
 
-         double wallThickness = IFCImportHandleUtil.GetOptionalScaledLengthAttribute(profileDef, "WallThickness", 0.0);
-         if ((wallThickness > MathUtil.Eps()) && (wallThickness < ((Math.Min(xDimVal, yDimVal) / 2.0) - MathUtil.Eps())))
+         if (rectangleHollowProfileDef != null)
          {
-            double innerXDimVal = xDimVal - wallThickness * 2.0;
-            double innerYDimVal = yDimVal - wallThickness * 2.0;
-            XYZ[] innerCorners = new XYZ[4] {
+            double wallThickness = rectangleHollowProfileDef.WallThickness;
+            if (wallThickness > MathUtil.Eps() && !double.IsNaN(wallThickness) && (wallThickness < ((Math.Min(xDimVal, yDimVal) / 2.0) - MathUtil.Eps())))
+            {
+               double innerXDimVal = xDimVal - wallThickness * 2.0;
+               double innerYDimVal = yDimVal - wallThickness * 2.0;
+               XYZ[] innerCorners = new XYZ[4] {
                     new XYZ( -innerXDimVal/2.0, -innerYDimVal/2.0, 0.0 ),
                     new XYZ( innerXDimVal/2.0, -innerYDimVal/2.0, 0.0 ),
                     new XYZ( innerXDimVal/2.0, innerYDimVal/2.0, 0.0 ),
                     new XYZ( -innerXDimVal/2.0, innerYDimVal/2.0, 0.0 )
                 };
 
-            double innerFilletRadius = IFCImportHandleUtil.GetOptionalScaledLengthAttribute(profileDef, "InnerFilletRadius", 0.0);
-            if ((innerFilletRadius > MathUtil.Eps()) && (innerFilletRadius < ((Math.Min(innerXDimVal, innerYDimVal) / 2.0) - MathUtil.Eps())))
-               InnerCurves.Add(CreateFilletedRectangleCurveLoop(innerCorners, innerFilletRadius));
+               double innerFilletRadius = rectangleHollowProfileDef.InnerFilletRadius;
+               if (!double.IsNaN(innerFilletRadius) && innerFilletRadius > MathUtil.Eps() && (innerFilletRadius < ((Math.Min(innerXDimVal, innerYDimVal) / 2.0) - MathUtil.Eps())))
+                  InnerCurves.Add(CreateFilletedRectangleCurveLoop(innerCorners, innerFilletRadius));
 
-            if (InnerCurves.Count == 0)
-               InnerCurves.Add(CreatePolyCurveLoop(innerCorners));
-         }
-      }
-
-      private void ProcessIFCRectangleProfileDef(IFCAnyHandle profileDef)
-      {
-         bool found = false;
-         double xDim = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(profileDef, "XDim", out found);
-         if (!found)
-            return;
-
-         double yDim = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(profileDef, "YDim", out found);
-         if (!found)
-            return;
-
-         if (xDim < MathUtil.Eps())
-            Importer.TheLog.LogError(Id, "IfcRectangleProfileDef has invalid XDim: " + xDim + ", ignoring.", true);
-
-         if (yDim < MathUtil.Eps())
-            Importer.TheLog.LogError(Id, "IfcRectangleProfileDef has invalid YDim: " + yDim + ", ignoring.", true);
-
-         if (IFCImportFile.TheFile.SchemaVersion >= IFCSchemaVersion.IFC2x2 && IFCAnyHandleUtil.IsSubTypeOf(profileDef, IFCEntityType.IfcRectangleHollowProfileDef))
-         {
-            ProcessIFCRectangleHollowProfileDef(profileDef, xDim, yDim);
-            return;
-         }
-
-         if (IFCAnyHandleUtil.IsSubTypeOf(profileDef, IFCEntityType.IfcRoundedRectangleProfileDef))
-         {
-            double roundedRadius = IFCImportHandleUtil.GetOptionalScaledLengthAttribute(profileDef, "RoundedRadius", 0.0);
-            if ((roundedRadius > MathUtil.Eps()) && (roundedRadius < ((Math.Min(xDim, yDim) / 2.0) - MathUtil.Eps())))
-            {
-               ProcessIFCRoundedRectangleProfileDef(profileDef, xDim, yDim, roundedRadius);
-               return;
+               if (InnerCurves.Count == 0)
+                  InnerCurves.Add(CreatePolyCurveLoop(innerCorners));
             }
          }
-
-         XYZ[] corners = new XYZ[4] {
-                new XYZ( -xDim/2.0, -yDim/2.0, 0.0 ),
-                new XYZ( xDim/2.0, -yDim/2.0, 0.0 ),
-                new XYZ( xDim/2.0, yDim/2.0, 0.0 ),
-                new XYZ( -xDim/2.0, yDim/2.0, 0.0 )
-            };
-
-         OuterCurve = CreatePolyCurveLoop(corners);
       }
 
-      private void ProcessIFCCircleProfileDef(IFCAnyHandle profileDef)
+      internal IFCParameterizedProfile(IfcCircleProfileDef profileDef)
+         : base(profileDef)
       {
-         bool found = false;
-         double radius = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(profileDef, "Radius", out found);
-         if (!found)
-            return;
+         Position = profileDef.Position.GetAxis2Placement2DTransform();
+         double radius = IFCUnitUtil.ScaleLength(profileDef.Radius);
 
          if (radius < MathUtil.Eps())
-            Importer.TheLog.LogError(Id, "IfcCircleProfileDef has invalid radius: " + radius + ", ignoring.", true);
+            Importer.TheLog.LogError(profileDef.StepId, "IfcCircleProfileDef has invalid radius: " + radius + ", ignoring.", true);
 
          // Some internal routines want CurveLoops with bounded components.  Split to avoid problems.
          OuterCurve = new CurveLoop();
          OuterCurve.Append(CreateXYArc(XYZ.Zero, radius, 0, Math.PI));
          OuterCurve.Append(CreateXYArc(XYZ.Zero, radius, Math.PI, 2 * Math.PI));
 
-         if (IFCAnyHandleUtil.IsSubTypeOf(profileDef, IFCEntityType.IfcCircleHollowProfileDef))
+         IfcCircleHollowProfileDef circleHollowProfileDef = profileDef as IfcCircleHollowProfileDef;
+         if (circleHollowProfileDef != null)
          {
-            double wallThickness = IFCImportHandleUtil.GetOptionalScaledLengthAttribute(profileDef, "WallThickness", 0.0);
+            double wallThickness = IFCUnitUtil.ScaleLength(circleHollowProfileDef.WallThickness);
             if (wallThickness > MathUtil.Eps() && wallThickness < radius)
             {
                double innerRadius = radius - wallThickness;
@@ -369,16 +215,12 @@ namespace Revit.IFC.Import.Data
          }
       }
 
-      private void ProcessIFCEllipseProfileDef(IFCAnyHandle profileDef)
+      internal IFCParameterizedProfile(IfcEllipseProfileDef profileDef)
+         : base(profileDef)
       {
-         bool found = false;
-         double radiusX = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(profileDef, "SemiAxis1", out found);
-         if (!found)
-            return;
-
-         double radiusY = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(profileDef, "SemiAxis2", out found);
-         if (!found)
-            return;
+         Position = profileDef.Position.GetAxis2Placement2DTransform();
+         double radiusX = IFCUnitUtil.ScaleLength(profileDef.SemiAxis1);
+         double radiusY = IFCUnitUtil.ScaleLength(profileDef.SemiAxis2);
 
          // Some internal routines want CurveLoops with bounded components.  Split to avoid problems.
          OuterCurve = new CurveLoop();
@@ -386,30 +228,20 @@ namespace Revit.IFC.Import.Data
          OuterCurve.Append(CreateXYEllipse(XYZ.Zero, radiusX, radiusY, Math.PI, 2 * Math.PI));
       }
 
-      private void ProcessIFCCShapeProfileDef(IFCAnyHandle profileDef)
+      internal IFCParameterizedProfile(IfcCShapeProfileDef profileDef)
+         : base(profileDef)
       {
-         bool found = false;
-         double depth = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(profileDef, "Depth", out found);
-         if (!found)
-            return;
+         Position = profileDef.Position.GetAxis2Placement2DTransform();
+         double depth = IFCUnitUtil.ScaleLength(profileDef.Depth);
+         double width = IFCUnitUtil.ScaleLength(profileDef.Width);
+         double wallThickness = IFCUnitUtil.ScaleLength(profileDef.WallThickness);
 
-         double width = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(profileDef, "Width", out found);
-         if (!found)
-            return;
+         double girth = IFCUnitUtil.ScaleLength(profileDef.Girth);
 
-         double wallThickness = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(profileDef, "WallThickness", out found);
-         if (!found)
-            return;
+         double centerOptX = 0;// Centre of Gravity shouldn't transform physical profile  IFCImportHandleUtil.GetOptionalScaledLengthAttribute(profileDef, "CentreOfGravityInX", 0.0);
+         double innerRadius = IFCUnitUtil.ScaleLength(profileDef.InternalFilletRadius);
 
-         double girth = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(profileDef, "Girth", out found);
-         if (!found)
-            return;
-
-         // Optional parameters
-         double centerOptX = IFCImportHandleUtil.GetOptionalScaledLengthAttribute(profileDef, "CentreOfGravityInX", 0.0);
-         double innerRadius = IFCImportHandleUtil.GetOptionalScaledLengthAttribute(profileDef, "InternalFilletRadius", 0.0);
-
-         bool hasFillet = !MathUtil.IsAlmostZero(innerRadius);
+         bool hasFillet = !MathUtil.IsAlmostZero(innerRadius) && !double.IsNaN(innerRadius);
          double outerRadius = hasFillet ? innerRadius + wallThickness : 0.0;
 
          XYZ[] cShapePoints = new XYZ[12] {
@@ -496,24 +328,19 @@ namespace Revit.IFC.Import.Data
          }
       }
 
-      private void ProcessIFCLShapeProfileDef(IFCAnyHandle profileDef)
+      internal IFCParameterizedProfile(IfcLShapeProfileDef profileDef)
+         : base(profileDef)
       {
-         bool found = false;
-         double depth = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(profileDef, "Depth", out found);
-         if (!found)
-            return;
+         Position = profileDef.Position.GetAxis2Placement2DTransform();
+         double depth = IFCUnitUtil.ScaleLength(profileDef.Depth);
+         double thickness = IFCUnitUtil.ScaleLength(profileDef.Thickness);
+         double width = IFCUnitUtil.ScaleLength(profileDef.Width);
 
-         double thickness = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(profileDef, "Thickness", out found);
-         if (!found)
-            return;
+         double filletRadius = IFCUnitUtil.ScaleLength(profileDef.FilletRadius);
+         bool filletedCorner = !MathUtil.IsAlmostZero(filletRadius) && !double.IsNaN(filletRadius);
 
-         double width = IFCImportHandleUtil.GetOptionalScaledLengthAttribute(profileDef, "Width", depth);
-
-         double filletRadius = IFCImportHandleUtil.GetOptionalScaledLengthAttribute(profileDef, "FilletRadius", 0.0);
-         bool filletedCorner = !MathUtil.IsAlmostZero(filletRadius);
-
-         double edgeRadius = IFCImportHandleUtil.GetOptionalScaledLengthAttribute(profileDef, "EdgeRadius", 0.0);
-         bool filletedEdge = !MathUtil.IsAlmostZero(edgeRadius);
+         double edgeRadius = IFCUnitUtil.ScaleLength(profileDef.EdgeRadius);
+         bool filletedEdge = !MathUtil.IsAlmostZero(edgeRadius) && !double.IsNaN(edgeRadius);
          if (filletedEdge && (thickness < edgeRadius - MathUtil.Eps()))
          {
             // LOG: WARN: IFC: In IfcLShapeProfileDef (#id), edgeRadius (value) >= thickness (value), ignoring."
@@ -521,12 +348,14 @@ namespace Revit.IFC.Import.Data
          }
          bool fullFilletedEdge = (filletedEdge && MathUtil.IsAlmostEqual(thickness, edgeRadius));
 
-         double centerOptX = IFCImportHandleUtil.GetOptionalScaledLengthAttribute(profileDef, "CentreOfGravityInX", 0.0);
+         double centerOptX = 0;// IFCImportHandleUtil.GetOptionalScaledLengthAttribute(profileDef, "CentreOfGravityInX", 0.0);
 
-         double centerOptY = IFCImportHandleUtil.GetOptionalScaledLengthAttribute(profileDef, "CentreOfGravityInY", centerOptX);
+         double centerOptY = 0;// IFCImportHandleUtil.GetOptionalScaledLengthAttribute(profileDef, "CentreOfGravityInY", centerOptX);
 
          // TODO: use leg slope
-         double legSlope = IFCImportHandleUtil.GetOptionalScaledAngleAttribute(profileDef, "LegSlope", 0.0);
+         double legSlope = IFCUnitUtil.ScaleAngle(profileDef.LegSlope);// IFCImportHandleUtil.GetOptionalScaledAngleAttribute(profileDef, "LegSlope", 0.0);
+         if (double.IsNaN(legSlope))
+            legSlope = 0;
 
          XYZ lOrig = new XYZ(-width / 2.0 + centerOptX, -depth / 2.0 + centerOptY, 0.0);
          XYZ lLR = new XYZ(lOrig[0] + width, lOrig[1], 0.0);
@@ -624,27 +453,16 @@ namespace Revit.IFC.Import.Data
          OuterCurve.Append(Line.CreateBound(lUL, lOrig));
       }
 
-      private void ProcessIFCIShapeProfileDef(IFCAnyHandle profileDef)
+      internal IFCParameterizedProfile(IfcIShapeProfileDef profileDef)
+         : base(profileDef)
       {
-         bool found = false;
-         double width = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(profileDef, "OverallWidth", out found);
-         if (!found)
-            return;
-
-         double depth = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(profileDef, "OverallDepth", out found);
-         if (!found)
-            return;
-
-         double webThickness = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(profileDef, "WebThickness", out found);
-         if (!found)
-            return;
-
-         double flangeThickness = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(profileDef, "FlangeThickness", out found);
-         if (!found)
-            return;
-
-         double filletRadius = IFCImportHandleUtil.GetOptionalScaledLengthAttribute(profileDef, "FilletRadius", 0.0);
-         bool hasFillet = !MathUtil.IsAlmostZero(filletRadius);
+         Position = profileDef.Position.GetAxis2Placement2DTransform();
+         double width = IFCUnitUtil.ScaleLength(profileDef.OverallWidth);
+         double depth = IFCUnitUtil.ScaleLength(profileDef.OverallDepth);
+         double webThickness = IFCUnitUtil.ScaleLength(profileDef.WebThickness);
+         double flangeThickness = IFCUnitUtil.ScaleLength(profileDef.FlangeThickness);
+         double filletRadius = IFCUnitUtil.ScaleLength(profileDef.FilletRadius);
+         bool hasFillet = !MathUtil.IsAlmostZero(filletRadius) && !double.IsNaN(filletRadius);
 
          // take advantage of X/Y symmetries below.
          XYZ[] iShapePoints = new XYZ[12] {
@@ -724,41 +542,35 @@ namespace Revit.IFC.Import.Data
          }
       }
 
-      private void ProcessIFCTShapeProfileDef(IFCAnyHandle profileDef)
+      internal IFCParameterizedProfile(IfcTShapeProfileDef profileDef)
+         : base(profileDef)
       {
-         bool found = false;
-         double flangeWidth = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(profileDef, "FlangeWidth", out found);
-         if (!found)
-            return;
+         Position = profileDef.Position.GetAxis2Placement2DTransform();
+         double flangeWidth = IFCUnitUtil.ScaleLength(profileDef.FlangeWidth);
+         double depth = IFCUnitUtil.ScaleLength(profileDef.Depth);
+         double webThickness = IFCUnitUtil.ScaleLength(profileDef.WebThickness);
+         double flangeThickness = IFCUnitUtil.ScaleLength(profileDef.FlangeThickness);
 
-         double depth = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(profileDef, "Depth", out found);
-         if (!found)
-            return;
+         double centerOptY = 0;// IFCImportHandleUtil.GetOptionalScaledLengthAttribute(profileDef, "CentreOfGravityInY", 0.0);
 
-         double webThickness = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(profileDef, "WebThickness", out found);
-         if (!found)
-            return;
+         double filletRadius = IFCUnitUtil.ScaleLength(profileDef.FilletRadius);
+         bool hasFillet = !MathUtil.IsAlmostZero(filletRadius) && !double.IsNaN(filletRadius);
 
-         double flangeThickness = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(profileDef, "FlangeThickness", out found);
-         if (!found)
-            return;
+         double flangeEdgeRadius = IFCUnitUtil.ScaleLength(profileDef.FlangeEdgeRadius);
+         bool hasFlangeEdge = !MathUtil.IsAlmostZero(flangeEdgeRadius) && !double.IsNaN(flangeEdgeRadius);
 
-         double centerOptY = IFCImportHandleUtil.GetOptionalScaledLengthAttribute(profileDef, "CentreOfGravityInY", 0.0);
+         double webEdgeRadius = IFCUnitUtil.ScaleLength(profileDef.WebEdgeRadius);
+         bool hasWebEdge = !MathUtil.IsAlmostZero(webEdgeRadius) && !double.IsNaN(webEdgeRadius);
 
-         double filletRadius = IFCImportHandleUtil.GetOptionalScaledLengthAttribute(profileDef, "FilletRadius", 0.0);
-         bool hasFillet = !MathUtil.IsAlmostZero(filletRadius);
-
-         double flangeEdgeRadius = IFCImportHandleUtil.GetOptionalScaledLengthAttribute(profileDef, "FlangeEdgeRadius", 0.0);
-         bool hasFlangeEdge = !MathUtil.IsAlmostZero(flangeEdgeRadius);
-
-         double webEdgeRadius = IFCImportHandleUtil.GetOptionalScaledLengthAttribute(profileDef, "WebEdgeRadius", 0.0);
-         bool hasWebEdge = !MathUtil.IsAlmostZero(webEdgeRadius);
-
-         double webSlope = IFCImportHandleUtil.GetOptionalScaledAngleAttribute(profileDef, "WebSlope", 0.0);
+         double webSlope = IFCUnitUtil.ScaleAngle(profileDef.WebSlope);
+         if (double.IsNaN(webSlope))
+            webSlope = 0;
          double webDeltaX = (depth / 2.0) * Math.Sin(webSlope);
          XYZ webDir = new XYZ(-Math.Sin(webSlope), Math.Cos(webSlope), 0.0);
 
-         double flangeSlope = IFCImportHandleUtil.GetOptionalScaledAngleAttribute(profileDef, "FlangeSlope", 0.0);
+         double flangeSlope = IFCUnitUtil.ScaleAngle(profileDef.FlangeSlope);
+         if (double.IsNaN(flangeSlope))
+            flangeSlope = 0;
          double flangeDeltaY = (flangeWidth / 4.0) * Math.Sin(flangeSlope);
          XYZ flangeDir = new XYZ(Math.Cos(flangeSlope), -Math.Sin(flangeSlope), 0.0);
 
@@ -791,34 +603,25 @@ namespace Revit.IFC.Import.Data
          OuterCurve = CreatePolyCurveLoop(tShapePoints);
       }
 
-      private void ProcessIFCUShapeProfileDef(IFCAnyHandle profileDef)
+      internal IFCParameterizedProfile(IfcUShapeProfileDef profileDef)
+         : base(profileDef)
       {
-         bool found = false;
-         double flangeWidth = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(profileDef, "FlangeWidth", out found);
-         if (!found)
-            return;
+         Position = profileDef.Position.GetAxis2Placement2DTransform();
+         double flangeWidth = IFCUnitUtil.ScaleLength(profileDef.FlangeWidth);
+         double depth = IFCUnitUtil.ScaleLength(profileDef.Depth);
+         double webThickness = IFCUnitUtil.ScaleLength(profileDef.WebThickness);
+         double flangeThickness = IFCUnitUtil.ScaleLength(profileDef.FlangeThickness);
+         double centerOptX = 0;// IFCImportHandleUtil.GetOptionalScaledLengthAttribute(profileDef, "CentreOfGravityInX", 0.0);
 
-         double depth = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(profileDef, "Depth", out found);
-         if (!found)
-            return;
+         double filletRadius = IFCUnitUtil.ScaleLength(profileDef.FilletRadius);
+         bool hasFillet = !MathUtil.IsAlmostZero(filletRadius) && !double.IsNaN(filletRadius);
 
-         double webThickness = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(profileDef, "WebThickness", out found);
-         if (!found)
-            return;
+         double edgeRadius = IFCUnitUtil.ScaleLength(profileDef.EdgeRadius);
+         bool hasEdgeRadius = !MathUtil.IsAlmostZero(edgeRadius) && !double.IsNaN(edgeRadius);
 
-         double flangeThickness = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(profileDef, "FlangeThickness", out found);
-         if (!found)
-            return;
-
-         double centerOptX = IFCImportHandleUtil.GetOptionalScaledLengthAttribute(profileDef, "CentreOfGravityInX", 0.0);
-
-         double filletRadius = IFCImportHandleUtil.GetOptionalScaledLengthAttribute(profileDef, "FilletRadius", 0.0);
-         bool hasFillet = !MathUtil.IsAlmostZero(filletRadius);
-
-         double edgeRadius = IFCImportHandleUtil.GetOptionalScaledLengthAttribute(profileDef, "EdgeRadius", 0.0);
-         bool hasEdgeRadius = !MathUtil.IsAlmostZero(edgeRadius);
-
-         double flangeSlope = IFCImportHandleUtil.GetOptionalScaledAngleAttribute(profileDef, "FlangeSlope", 0.0);
+         double flangeSlope = IFCUnitUtil.ScaleAngle(profileDef.FlangeSlope);
+         if (double.IsNaN(flangeSlope))
+            flangeSlope = 0;
          double flangeDirY = Math.Sin(flangeSlope);
 
          // start lower left, CCW.
@@ -837,30 +640,20 @@ namespace Revit.IFC.Import.Data
          OuterCurve = CreatePolyCurveLoop(uShapePoints);
       }
 
-      private void ProcessIFCZShapeProfileDef(IFCAnyHandle profileDef)
+      internal IFCParameterizedProfile(IfcZShapeProfileDef profileDef)
+         : base(profileDef)
       {
-         bool found = false;
-         double flangeWidth = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(profileDef, "FlangeWidth", out found);
-         if (!found)
-            return;
+         Position = profileDef.Position.GetAxis2Placement2DTransform();
+         double flangeWidth = IFCUnitUtil.ScaleLength(profileDef.FlangeWidth);
+         double depth = IFCUnitUtil.ScaleLength(profileDef.Depth);
+         double webThickness = IFCUnitUtil.ScaleLength(profileDef.WebThickness);
+         double flangeThickness = IFCUnitUtil.ScaleLength(profileDef.FlangeThickness);
 
-         double depth = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(profileDef, "Depth", out found);
-         if (!found)
-            return;
+         double filletRadius = IFCUnitUtil.ScaleLength(profileDef.FilletRadius);
+         bool hasFillet = !MathUtil.IsAlmostZero(filletRadius) && !double.IsNaN(filletRadius);
 
-         double webThickness = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(profileDef, "WebThickness", out found);
-         if (!found)
-            return;
-
-         double flangeThickness = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(profileDef, "FlangeThickness", out found);
-         if (!found)
-            return;
-
-         double filletRadius = IFCImportHandleUtil.GetOptionalScaledLengthAttribute(profileDef, "FilletRadius", 0.0);
-         bool hasFillet = !MathUtil.IsAlmostZero(filletRadius);
-
-         double edgeRadius = IFCImportHandleUtil.GetOptionalScaledLengthAttribute(profileDef, "EdgeRadius", 0.0);
-         bool hasEdgeRadius = !MathUtil.IsAlmostZero(edgeRadius);
+         double edgeRadius = IFCUnitUtil.ScaleLength(profileDef.EdgeRadius);
+         bool hasEdgeRadius = !MathUtil.IsAlmostZero(edgeRadius) && !double.IsNaN(edgeRadius);
 
          XYZ[] zShapePoints = new XYZ[8] {
                 new XYZ(-webThickness/2.0, -depth/2.0, 0.0),
@@ -970,69 +763,48 @@ namespace Revit.IFC.Import.Data
          OuterCurve.Append(Line.CreateBound(zNextStart, zShapePoints[0]));
       }
 
-      protected override void Process(IFCAnyHandle profileDef)
-      {
-         base.Process(profileDef);
-
-         IFCAnyHandle positionHnd = IFCImportHandleUtil.GetRequiredInstanceAttribute(profileDef, "Position", false);
-         if (!IFCAnyHandleUtil.IsNullOrHasNoValue(positionHnd))
-            Position = IFCLocation.ProcessIFCAxis2Placement(positionHnd);
-         else
-         {
-            Importer.TheLog.LogWarning(profileDef.StepId, "\"Position\" attribute not specified in IfcParameterizedProfileDef, using origin.", false);
-            Position = Transform.Identity;
-         }
-
-         if (IFCAnyHandleUtil.IsSubTypeOf(profileDef, IFCEntityType.IfcRectangleProfileDef))
-            ProcessIFCRectangleProfileDef(profileDef);
-         else if (IFCAnyHandleUtil.IsSubTypeOf(profileDef, IFCEntityType.IfcCircleProfileDef))
-            ProcessIFCCircleProfileDef(profileDef);
-         else if (IFCAnyHandleUtil.IsSubTypeOf(profileDef, IFCEntityType.IfcEllipseProfileDef))
-            ProcessIFCEllipseProfileDef(profileDef);
-         else if (IFCAnyHandleUtil.IsSubTypeOf(profileDef, IFCEntityType.IfcCShapeProfileDef))
-            ProcessIFCCShapeProfileDef(profileDef);
-         else if (IFCAnyHandleUtil.IsSubTypeOf(profileDef, IFCEntityType.IfcLShapeProfileDef))
-            ProcessIFCLShapeProfileDef(profileDef);
-         else if (IFCAnyHandleUtil.IsSubTypeOf(profileDef, IFCEntityType.IfcIShapeProfileDef))
-            ProcessIFCIShapeProfileDef(profileDef);
-         else if (IFCAnyHandleUtil.IsSubTypeOf(profileDef, IFCEntityType.IfcTShapeProfileDef))
-            ProcessIFCTShapeProfileDef(profileDef);
-         else if (IFCAnyHandleUtil.IsSubTypeOf(profileDef, IFCEntityType.IfcUShapeProfileDef))
-            ProcessIFCUShapeProfileDef(profileDef);
-         else if (IFCAnyHandleUtil.IsSubTypeOf(profileDef, IFCEntityType.IfcZShapeProfileDef))
-            ProcessIFCZShapeProfileDef(profileDef);
-         else
-         {
-            //LOG: ERROR: IfcParameterizedProfileDef of subtype {subtype} not supported.
-         }
-      }
-
-      /// <summary>
-      /// Default constructor.
-      /// </summary>
       protected IFCParameterizedProfile()
       {
 
       }
 
-      protected IFCParameterizedProfile(IFCAnyHandle profileDef)
+      public static IFCParameterizedProfile CreateIFCParameterizedProfile(IfcParameterizedProfileDef ifcProfileDef)
       {
-         Process(profileDef);
-      }
-
-      public static IFCParameterizedProfile ProcessIFCParameterizedProfile(IFCAnyHandle ifcProfileDef)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcProfileDef))
+         if (ifcProfileDef == null)
          {
             Importer.TheLog.LogNullError(IFCEntityType.IfcProfileDef);
             return null;
          }
+         IfcRectangleProfileDef rectangleProfileDef = ifcProfileDef as IfcRectangleProfileDef;
+         if (rectangleProfileDef != null)
+            return new IFCParameterizedProfile(rectangleProfileDef);
+         IfcCircleProfileDef circleProfileDef = ifcProfileDef as IfcCircleProfileDef;
+         if (circleProfileDef != null)
+            return new IFCParameterizedProfile(circleProfileDef);
+         IfcEllipseProfileDef ellipseProfileDef = ifcProfileDef as IfcEllipseProfileDef;
+         if (ellipseProfileDef != null)
+            return new IFCParameterizedProfile(ellipseProfileDef);
+         IfcCShapeProfileDef cShapeProfileDef = ifcProfileDef as IfcCShapeProfileDef;
+         if (cShapeProfileDef != null)
+            return new IFCParameterizedProfile(cShapeProfileDef);
+         IfcIShapeProfileDef iShapeProfileDef = ifcProfileDef as IfcIShapeProfileDef;
+         if (iShapeProfileDef != null)
+            return new IFCParameterizedProfile(iShapeProfileDef);
+         IfcLShapeProfileDef lShapeProfileDef = ifcProfileDef as IfcLShapeProfileDef;
+         if (lShapeProfileDef != null)
+            return new IFCParameterizedProfile(lShapeProfileDef);
+         IfcTShapeProfileDef tShapeProfileDef = ifcProfileDef as IfcTShapeProfileDef;
+         if (tShapeProfileDef != null)
+            return new IFCParameterizedProfile(tShapeProfileDef);
+         IfcUShapeProfileDef uShapeProfileDef = ifcProfileDef as IfcUShapeProfileDef;
+         if (uShapeProfileDef != null)
+            return new IFCParameterizedProfile(uShapeProfileDef);
+         IfcZShapeProfileDef zShapeProfileDef = ifcProfileDef as IfcZShapeProfileDef;
+         if (zShapeProfileDef != null)
+            return new IFCParameterizedProfile(zShapeProfileDef);
 
-         IFCEntity profileDef;
-         if (IFCImportFile.TheFile.EntityMap.TryGetValue(ifcProfileDef.StepId, out profileDef))
-            return (profileDef as IFCParameterizedProfile);
-
-         return new IFCParameterizedProfile(ifcProfileDef);
+         Importer.TheLog.LogUnhandledSubTypeError(ifcProfileDef, IFCEntityType.IfcProfileDef, false);
+         return null;
       }
 
    }
@@ -1059,20 +831,25 @@ namespace Revit.IFC.Import.Data
          protected set { m_Position = value; }
       }
 
-      private void ProcessIFCArbitraryOpenProfileDef(IFCAnyHandle profileDef)
+      protected IFCSimpleProfile(IfcProfileDef profileDef)
+         : base(profileDef)
       {
-         IFCAnyHandle curveHnd = IFCAnyHandleUtil.GetInstanceAttribute(profileDef, "Curve");
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(curveHnd))
+
+      }
+      internal IFCSimpleProfile(IfcArbitraryOpenProfileDef profileDef)
+         : base(profileDef)
+      {
+         IfcBoundedCurve curveHnd = profileDef.Curve;
+         if (curveHnd == null)
          {
             Importer.TheLog.LogNullError(IFCEntityType.IfcArbitraryOpenProfileDef);
             return;
          }
 
-         IFCCurve profileIFCCurve = IFCCurve.ProcessIFCCurve(curveHnd);
-         CurveLoop profileCurveLoop = profileIFCCurve.CurveLoop;
+         CurveLoop profileCurveLoop = curveHnd.CurveLoop();
          if (profileCurveLoop == null)
          {
-            Curve profileCurve = profileIFCCurve.Curve;
+            Curve profileCurve = curveHnd.Curve();
             if (profileCurve != null)
             {
                profileCurveLoop = new CurveLoop();
@@ -1081,34 +858,38 @@ namespace Revit.IFC.Import.Data
          }
 
 
-         if ((profileCurveLoop != null) && IFCAnyHandleUtil.IsSubTypeOf(profileDef, IFCEntityType.IfcCenterLineProfileDef))
+         if (profileCurveLoop != null)
          {
-            double? thickness = IFCAnyHandleUtil.GetDoubleAttribute(profileDef, "Thickness");
-            if (!thickness.HasValue)
+            IfcCenterLineProfileDef centerLineProfileDef = profileDef as IfcCenterLineProfileDef;
+            if (centerLineProfileDef != null)
             {
-               //LOG: ERROR: IfcCenterLineProfileDef has no thickness defined.
-               return;
-            }
 
-            Plane plane = null;
-            try
-            {
-               plane = profileCurveLoop.GetPlane();
-            }
-            catch
-            {
-               //LOG: ERROR: Curve for IfcCenterLineProfileDef is non-planar.
-               return;
-            }
+               double thickness = IFCUnitUtil.ScaleLength(centerLineProfileDef.Thickness);
+               if (double.IsNaN(thickness))
+               {
+                  //LOG: ERROR: IfcCenterLineProfileDef has no thickness defined.
+                  return;
+               }
 
-            double thicknessVal = IFCUnitUtil.ScaleLength(thickness.Value);
-            profileCurveLoop = null;
-            try
-            {
-               profileCurveLoop = CurveLoop.CreateViaThicken(profileCurveLoop, thicknessVal, plane.Normal);
-            }
-            catch
-            {
+               Plane plane = null;
+               try
+               {
+                  plane = profileCurveLoop.GetPlane();
+               }
+               catch
+               {
+                  //LOG: ERROR: Curve for IfcCenterLineProfileDef is non-planar.
+                  return;
+               }
+
+               profileCurveLoop = null;
+               try
+               {
+                  profileCurveLoop = CurveLoop.CreateViaThicken(profileCurveLoop, thickness, plane.Normal);
+               }
+               catch
+               {
+               }
             }
          }
 
@@ -1161,21 +942,21 @@ namespace Revit.IFC.Import.Data
          return innerCurveLoop;
       }
 
-      private void ProcessIFCArbitraryClosedProfileDef(IFCAnyHandle profileDef)
+      internal IFCSimpleProfile(IfcArbitraryClosedProfileDef profileDef)
+         :base(profileDef)
       {
-         IFCAnyHandle curveHnd = IFCImportHandleUtil.GetRequiredInstanceAttribute(profileDef, "OuterCurve", false);
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(curveHnd))
+         IfcBoundedCurve curveHnd = profileDef.OuterCurve;
+         if(curveHnd == null)
             return;
 
-         IFCCurve outerIFCCurve = IFCCurve.ProcessIFCCurve(curveHnd);
-         CurveLoop outerCurveLoop = outerIFCCurve.CurveLoop;
+         CurveLoop outerCurveLoop = curveHnd.CurveLoop();
 
          // We need to convert outerIFCCurve into a CurveLoop with bound curves.  This is handled below (with possible errors logged).
          if (outerCurveLoop != null)
             OuterCurve = outerCurveLoop;
          else
          {
-            Curve outerCurve = outerIFCCurve.Curve;
+            Curve outerCurve = curveHnd.Curve();
             if (outerCurve == null)
                Importer.TheLog.LogError(profileDef.StepId, "Couldn't convert outer curve #" + curveHnd.StepId + " in IfcArbitraryClosedProfileDef.", true);
             else
@@ -1191,19 +972,20 @@ namespace Revit.IFC.Import.Data
             }
          }
 
-         if (IFCAnyHandleUtil.IsSubTypeOf(profileDef, IFCEntityType.IfcArbitraryProfileDefWithVoids))
+         IfcArbitraryProfileDefWithVoids arbitraryProfileDefWithVoids = profileDef as IfcArbitraryProfileDefWithVoids;
+         if (arbitraryProfileDefWithVoids != null)
          {
-            IList<IFCAnyHandle> innerCurveHnds = IFCAnyHandleUtil.GetAggregateInstanceAttribute<List<IFCAnyHandle>>(profileDef, "InnerCurves");
+            IList<IfcCurve> innerCurveHnds = arbitraryProfileDefWithVoids.InnerCurves;
             if (innerCurveHnds == null || innerCurveHnds.Count == 0)
             {
                Importer.TheLog.LogWarning(profileDef.StepId, "IfcArbitraryProfileDefWithVoids has no voids.", false);
                return;
             }
 
-            ISet<IFCAnyHandle> usedHandles = new HashSet<IFCAnyHandle>();
-            foreach (IFCAnyHandle innerCurveHnd in innerCurveHnds)
+            ISet<IfcCurve> usedHandles = new HashSet<IfcCurve>();
+            foreach (IfcCurve innerCurveHnd in innerCurveHnds)
             {
-               if (IFCAnyHandleUtil.IsNullOrHasNoValue(innerCurveHnd))
+               if (innerCurveHnd == null)
                {
                   Importer.TheLog.LogWarning(profileDef.StepId, "Null or invalid inner curve handle in IfcArbitraryProfileDefWithVoids.", false);
                   continue;
@@ -1224,12 +1006,11 @@ namespace Revit.IFC.Import.Data
 
                usedHandles.Add(innerCurveHnd);
 
-               IFCCurve innerIFCCurve = IFCCurve.ProcessIFCCurve(innerCurveHnd);
-               CurveLoop innerCurveLoop = innerIFCCurve.CurveLoop;
+               CurveLoop innerCurveLoop = innerCurveHnd.CurveLoop();
 
                // See if we have a closed curve instead.
                if (innerCurveLoop == null)
-                  innerCurveLoop = CreateCurveLoopFromUnboundedCyclicCurve(innerIFCCurve.Curve);
+                  innerCurveLoop = CreateCurveLoopFromUnboundedCyclicCurve(innerCurveHnd.Curve());
 
                if (innerCurveLoop == null)
                {
@@ -1251,45 +1032,42 @@ namespace Revit.IFC.Import.Data
 
       }
 
-      protected override void Process(IFCAnyHandle profileDef)
-      {
-         base.Process(profileDef);
-
-         if (IFCAnyHandleUtil.IsSubTypeOf(profileDef, IFCEntityType.IfcArbitraryOpenProfileDef))
-            ProcessIFCArbitraryOpenProfileDef(profileDef);
-         else if (IFCAnyHandleUtil.IsSubTypeOf(profileDef, IFCEntityType.IfcArbitraryClosedProfileDef))
-            ProcessIFCArbitraryClosedProfileDef(profileDef);
-      }
-
-      protected IFCSimpleProfile(IFCAnyHandle profileDef)
-      {
-         Process(profileDef);
-      }
+      
 
       /// <summary>
       /// Process an IFCAnyHandle corresponding to a simple profile.
       /// </summary>
       /// <param name="ifcProfileDef"></param>
       /// <returns>IFCSimpleProfile object.</returns>
-      public static IFCSimpleProfile ProcessIFCSimpleProfile(IFCAnyHandle ifcProfileDef)
+      public static IFCSimpleProfile CreateIFCSimpleProfile(IfcProfileDef ifcProfileDef, CreateElementIfcCache cache)
       {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcProfileDef))
+         if (ifcProfileDef == null)
          {
             Importer.TheLog.LogNullError(IFCEntityType.IfcProfileDef);
             return null;
          }
 
-         IFCEntity profileDef;
-         if (IFCImportFile.TheFile.EntityMap.TryGetValue(ifcProfileDef.StepId, out profileDef))
-            return (profileDef as IFCSimpleProfile);
+         IFCSimpleProfile simpleProfile = null;
+         if (cache.Profiles.TryGetValue(ifcProfileDef.StepId, out simpleProfile))
+            return simpleProfile;
 
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcProfileDef, IFCEntityType.IfcArbitraryOpenProfileDef) ||
-             (IFCAnyHandleUtil.IsSubTypeOf(ifcProfileDef, IFCEntityType.IfcArbitraryClosedProfileDef)))
-            return new IFCSimpleProfile(ifcProfileDef);
-
-         // IFC2x files don't have IfcParameterizedProfileDef, so we won't check the type.  If profileDef is the wrong entity type, it will fail in
-         // ProcessIFCParameterizedProfileDef.
-         return IFCParameterizedProfile.ProcessIFCParameterizedProfile(ifcProfileDef);
+         IfcArbitraryClosedProfileDef arbitraryClosedProfileDef = ifcProfileDef as IfcArbitraryClosedProfileDef;
+         if (arbitraryClosedProfileDef != null)
+            simpleProfile = new IFCSimpleProfile(arbitraryClosedProfileDef);
+         else
+         {
+            IfcArbitraryOpenProfileDef arbitraryOpenProfileDef = ifcProfileDef as IfcArbitraryOpenProfileDef;
+            if (arbitraryOpenProfileDef != null)
+               simpleProfile = new IFCSimpleProfile(arbitraryOpenProfileDef);
+            else
+            {
+               IfcParameterizedProfileDef parameterizedProfileDef = ifcProfileDef as IfcParameterizedProfileDef;
+               if (parameterizedProfileDef != null)
+                  simpleProfile = IFCParameterizedProfile.CreateIFCParameterizedProfile(parameterizedProfileDef);
+            }
+         }
+         cache.Profiles[ifcProfileDef.StepId] = simpleProfile;
+         return simpleProfile;
       }
 
       /// <summary>

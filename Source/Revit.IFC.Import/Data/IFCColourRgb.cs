@@ -28,59 +28,24 @@ using Revit.IFC.Common.Enums;
 using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
-   /// <summary>
-   /// Class representing an IfcColourRgb entity.
-   /// </summary>
-   public class IFCColourRgb : IFCColourSpecification
+   public static class IFCColourRgb 
    {
-      private double m_NormalisedRed = 0.5;
-
-      private double m_NormalisedGreen = 0.5;
-
-      private double m_NormalisedBlue = 0.5;
-
-      protected IFCColourRgb()
-      {
-      }
-
-      /// <summary>
-      /// Get the "raw" normalised red value.
-      /// </summary>
-      public double NormalisedRed
-      {
-         get { return m_NormalisedRed; }
-         protected set { m_NormalisedRed = value; }
-      }
-
-      /// <summary>
-      /// Get the "raw" normalised blue value.
-      /// </summary>
-      public double NormalisedBlue
-      {
-         get { return m_NormalisedBlue; }
-         protected set { m_NormalisedBlue = value; }
-      }
-
-      /// <summary>
-      /// Get the "raw" normalised green value.
-      /// </summary>
-      public double NormalisedGreen
-      {
-         get { return m_NormalisedGreen; }
-         protected set { m_NormalisedGreen = value; }
-      }
-
+      public static Color DefaultColor() { return new Color(127, 127, 127); }
       /// <summary>
       /// Get the RGB associated to the color.
       /// </summary>
       /// <returns>The Color value.</returns>
-      protected override Color CreateColor()
+      public static Color CreateColor(this IfcColourRgb colourRgb)
       {
-         byte red = (byte)(NormalisedRed * 255 + 0.5);
-         byte green = (byte)(NormalisedGreen * 255 + 0.5);
-         byte blue = (byte)(NormalisedBlue * 255 + 0.5);
+         if(colourRgb == null)
+            return DefaultColor();
+         byte red = (byte)(colourRgb.Red * 255 + 0.5);
+         byte green = (byte)(colourRgb.Green * 255 + 0.5);
+         byte blue = (byte)(colourRgb.Blue * 255 + 0.5);
          return new Color(red, green, blue);
       }
 
@@ -89,24 +54,24 @@ namespace Revit.IFC.Import.Data
       /// </summary>
       /// <param name="factor">The normalised factor from 0 to 1.</param>
       /// <returns>The Color value.</returns>
-      public Color GetScaledColor(double factor)
+      public static Color GetScaledColor(this IfcColourRgb colourRgb, double factor)
       {
          if (factor < MathUtil.Eps())
          {
-            Importer.TheLog.LogWarning(Id, "Invalid negative scaling factor of " + factor + ", defaulting to black.", true);
+            Importer.TheLog.LogWarning(colourRgb.StepId, "Invalid negative scaling factor of " + factor + ", defaulting to black.", true);
             return new Color(0, 0, 0);
          }
 
-         Color origColor = GetColor();
+         Color origColor = colourRgb.CreateColor();
          if (origColor == null)
          {
-            Importer.TheLog.LogError(Id, "Couldn't create color, default to grey.", false);
-            return new Color(127, 127, 127);
+            Importer.TheLog.LogError(colourRgb.StepId, "Couldn't create color, default to grey.", false);
+            return DefaultColor();
          }
 
          if (factor > 1.0 + MathUtil.Eps())
          {
-            Importer.TheLog.LogWarning(Id, "Invalid normalised scaling factor of " + factor + ", defaulting to original color", true);
+            Importer.TheLog.LogWarning(colourRgb.StepId, "Invalid normalised scaling factor of " + factor + ", defaulting to original color", true);
             return origColor;
          }
 
@@ -114,39 +79,6 @@ namespace Revit.IFC.Import.Data
          byte green = (byte)(origColor.Green * 255 * factor + 0.5);
          byte blue = (byte)(origColor.Blue * 255 * factor + 0.5);
          return new Color(red, green, blue);
-      }
-
-      override protected void Process(IFCAnyHandle item)
-      {
-         base.Process(item);
-
-         NormalisedRed = IFCImportHandleUtil.GetOptionalNormalisedRatioAttribute(item, "Red", 0.5);
-         NormalisedGreen = IFCImportHandleUtil.GetOptionalNormalisedRatioAttribute(item, "Green", 0.5);
-         NormalisedBlue = IFCImportHandleUtil.GetOptionalNormalisedRatioAttribute(item, "Blue", 0.5);
-      }
-
-      protected IFCColourRgb(IFCAnyHandle item)
-      {
-         Process(item);
-      }
-
-      /// <summary>
-      /// Processes an IfcColourRgb entity handle.
-      /// </summary>
-      /// <param name="ifcColourRgb">The IfcColourRgb handle.</param>
-      /// <returns>The IFCColourRgb object.</returns>
-      public static IFCColourRgb ProcessIFCColourRgb(IFCAnyHandle ifcColourRgb)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcColourRgb))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcColourRgb);
-            return null;
-         }
-
-         IFCEntity colourRgb;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcColourRgb.StepId, out colourRgb))
-            colourRgb = new IFCColourRgb(ifcColourRgb);
-         return (colourRgb as IFCColourRgb);
       }
    }
 }

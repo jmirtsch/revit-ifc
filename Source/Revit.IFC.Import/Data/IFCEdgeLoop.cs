@@ -29,95 +29,32 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
    /// <summary>
    /// Class that represents IfcEdgeLoop entity
    /// </summary>
-   public class IFCEdgeLoop : IFCLoop
+   public static class IFCEdgeLoop 
    {
-      IList<IFCOrientedEdge> m_EdgeList = null;
+         // TODO in REVIT-61368: check that edgeList is closed and continuous
 
-      /// <summary>
-      /// A list of oriented edge entities which are concatenated together to form this path.
-      /// </summary>
-      public IList<IFCOrientedEdge> EdgeList
-      {
-         get
-         {
-            if (m_EdgeList == null)
-            {
-               m_EdgeList = new List<IFCOrientedEdge>();
-            }
-            return m_EdgeList;
-         }
-         set { m_EdgeList = value; }
-      }
-
-      protected IFCEdgeLoop()
-      {
-      }
-
-      protected IFCEdgeLoop(IFCAnyHandle ifcEdgeLoop)
-      {
-         Process(ifcEdgeLoop);
-      }
-
-      override protected void Process(IFCAnyHandle ifcEdgeLoop)
-      {
-         base.Process(ifcEdgeLoop);
-
-         // TODO in REVIT-61368: checks that edgeList is closed and continuous
-         IList<IFCAnyHandle> edgeList = IFCAnyHandleUtil.GetAggregateInstanceAttribute<List<IFCAnyHandle>>(ifcEdgeLoop, "EdgeList");
-         if (edgeList == null)
-         {
-            Importer.TheLog.LogError(Id, "Cannot find the EdgeList of this loop", true);
-         }
-         IFCOrientedEdge orientedEdge = null;
-         foreach (IFCAnyHandle edge in edgeList)
-         {
-            orientedEdge = IFCOrientedEdge.ProcessIFCOrientedEdge(edge);
-            EdgeList.Add(orientedEdge);
-         }
-      }
-
-      protected override CurveLoop GenerateLoop()
+      internal static CurveLoop GenerateLoop(this IfcEdgeLoop edgeLoop)
       {
          CurveLoop curveLoop = new CurveLoop();
-         foreach (IFCOrientedEdge edge in EdgeList)
+         foreach (IfcOrientedEdge edge in edgeLoop.EdgeList)
          {
             if (edge != null)
-               curveLoop.Append(edge.GetGeometry());
+               curveLoop.Append(edge.GetGeometry(true));
          }
          return curveLoop;
       }
 
-      protected override IList<XYZ> GenerateLoopVertices()
+      internal static bool CreateShapeEdgeLoop(this IfcEdgeLoop edgeLoop, CreateElementIfcCache cache, IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
       {
-         return null;
-      }
-
-      /// <summary>
-      /// Create an IFCEdgeLoop object from a handle of type IfcEdgeLoop.
-      /// </summary>
-      /// <param name="ifcEdgeLoop">The IFC handle.</param>
-      /// <returns>The IFCEdgeLoop object.</returns>
-      public static IFCEdgeLoop ProcessIFCEdgeLoop(IFCAnyHandle ifcEdgeLoop)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcEdgeLoop))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcFace);
-            return null;
-         }
-
-         IFCEntity edgeLoop;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcEdgeLoop.StepId, out edgeLoop))
-            edgeLoop = new IFCEdgeLoop(ifcEdgeLoop);
-         return (edgeLoop as IFCEdgeLoop);
-      }
-
-      protected override void CreateShapeInternal(IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
-      {
+         if (cache.InvalidForCreation.Contains(edgeLoop.StepId))
+            return false;
          if (shapeEditScope.BuilderType == IFCShapeBuilderType.BrepBuilder)
          {
             if (shapeEditScope.BuilderScope == null)
@@ -131,24 +68,24 @@ namespace Revit.IFC.Import.Data
                throw new InvalidOperationException("The wrong BuilderScope is created");
             }
 
-            foreach (IFCOrientedEdge edge in EdgeList)
+            foreach (IfcOrientedEdge edge in edgeLoop.EdgeList)
             {
                if (edge == null || edge.EdgeStart == null || edge.EdgeEnd == null)
                {
-                  Importer.TheLog.LogError(Id, "Invalid edge loop", true);
-                  return;
+                  Importer.TheLog.LogError(edgeLoop.StepId, "Invalid edge loop", true);
+                  return false;
                }
 
-               edge.CreateShape(shapeEditScope, lcs, scaledLcs, guid);
+               edge.CreateShape(cache, shapeEditScope, lcs, scaledLcs, guid);
 
                if (lcs == null)
                   lcs = Transform.Identity;
 
-               IFCEdge edgeElement = edge.EdgeElement;
+               IfcEdge edgeElement = edge.EdgeElement;
                Curve edgeGeometry = null;
-               if (edgeElement is IFCEdgeCurve)
+               if (edgeElement is IfcEdgeCurve)
                {
-                  edgeGeometry = edgeElement.GetGeometry();
+                  edgeGeometry = edgeElement.GetGeometry(edge.Orientation);
                }
                else
                {
@@ -158,30 +95,30 @@ namespace Revit.IFC.Import.Data
 
                if (edgeGeometry == null)
                {
-                  Importer.TheLog.LogError(edgeElement.Id, "Cannot get the edge geometry of this edge", true);
+                  Importer.TheLog.LogError(edgeElement.StepId, "Cannot get the edge geometry of this edge", true);
                }
-               XYZ edgeStart = edgeElement.EdgeStart.GetCoordinate();
-               XYZ edgeEnd = edgeElement.EdgeEnd.GetCoordinate();
+               XYZ edgeStart = edgeElement.EdgeStart.GetPoint();
+               XYZ edgeEnd = edgeElement.EdgeEnd.GetPoint();
 
                if (edgeStart == null || edgeEnd == null)
                {
-                  Importer.TheLog.LogError(Id, "Invalid start or end vertices", true);
+                  Importer.TheLog.LogError(edgeLoop.StepId, "Invalid start or end vertices", true);
                }
 
                bool orientation = lcs.HasReflection ? !edge.Orientation : edge.Orientation;
-               if (!brepBuilderScope.AddOrientedEdgeToTheBoundary(edgeElement.Id, edgeGeometry.CreateTransformed(lcs), lcs.OfPoint(edgeStart), lcs.OfPoint(edgeEnd), edge.Orientation))
+               if (!brepBuilderScope.AddOrientedEdgeToTheBoundary(edgeElement.StepId, edgeGeometry.CreateTransformed(lcs), lcs.OfPoint(edgeStart), lcs.OfPoint(edgeEnd), edge.Orientation))
                {
-                  Importer.TheLog.LogWarning(edge.Id, "Cannot add this edge to the edge loop with Id: " + Id, false);
-                  IsValidForCreation = false;
-                  return;
+                  Importer.TheLog.LogWarning(edge.StepId, "Cannot add this edge to the edge loop with Id: " + edgeLoop.StepId, false);
+                  cache.InvalidForCreation.Add(edge.StepId);
+                  return false;
                }
             }
          }
          else
          {
-            Importer.TheLog.LogError(Id, "Unsupported IFCEdgeLoop", true);
+            Importer.TheLog.LogError(edgeLoop.StepId, "Unsupported IFCEdgeLoop", true);
          }
-         base.CreateShapeInternal(shapeEditScope, lcs, scaledLcs, guid);
+         return false;
       }
    }
 }

@@ -17,62 +17,39 @@
 // Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 //
 
+using System;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.IFC;
 using Revit.IFC.Common.Utility;
 using Revit.IFC.Common.Enums;
+using Revit.IFC.Import.Utility;
+
+using GeometryGym.Ifc;
 
 namespace Revit.IFC.Import.Data
 {
    /// <summary>
    /// Class that represents IFCSurface entity
    /// </summary>
-   public abstract class IFCSurface : IFCRepresentationItem
+   public static class IFCSurface
    {
-      protected IFCSurface()
-      {
-      }
-
-      override protected void Process(IFCAnyHandle ifcCurve)
-      {
-         base.Process(ifcCurve);
-      }
-
       /// <summary>
       /// Get the local surface transform at a given point on the surface.
       /// </summary>
       /// <param name="pointOnSurface">The point.</param>
       /// <returns>The transform.</returns>
-      public virtual Transform GetTransformAtPoint(XYZ pointOnSurface)
+      public static Transform GetTransformAtPoint(this IfcSurface surface, XYZ pointOnSurface, CreateElementIfcCache cache)
       {
-         return null;
-      }
-
-      /// <summary>
-      /// Create an IFCSurface object from a handle of type IfcSurface.
-      /// </summary>
-      /// <param name="ifcSurface">The IFC handle.</param>
-      /// <returns>The IFCSurface object.</returns>
-      public static IFCSurface ProcessIFCSurface(IFCAnyHandle ifcSurface)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcSurface))
+         IfcElementarySurface elementarySurface = surface as IfcElementarySurface;
+         if(elementarySurface != null)
          {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcSurface);
-            return null;
+            Transform position = new Transform(elementarySurface.Position.GetAxis2Placement3DTransform());
+            position.Origin = pointOnSurface;
+            return position;
          }
-
-         IFCEntity surface;
-         if (IFCImportFile.TheFile.EntityMap.TryGetValue(ifcSurface.StepId, out surface))
-            return (surface as IFCSurface);
-
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcSurface, IFCEntityType.IfcElementarySurface))
-            return IFCElementarySurface.ProcessIFCElementarySurface(ifcSurface);
-         else if (IFCAnyHandleUtil.IsSubTypeOf(ifcSurface, IFCEntityType.IfcSweptSurface))
-            return IFCSweptSurface.ProcessIFCSweptSurface(ifcSurface);
-         else if (IFCAnyHandleUtil.IsSubTypeOf(ifcSurface, IFCEntityType.IfcBSplineSurface))
-            return IFCBSplineSurface.ProcessIFCBSplineSurface(ifcSurface);
-
-         Importer.TheLog.LogUnhandledSubTypeError(ifcSurface, IFCEntityType.IfcSurface, true);
+         IfcSurfaceOfLinearExtrusion surfaceOfLinearExtrusion = surface as IfcSurfaceOfLinearExtrusion;
+         if (surfaceOfLinearExtrusion != null)
+            return surfaceOfLinearExtrusion.GetTransformAtPoint(pointOnSurface, cache);
          return null;
       }
 
@@ -81,8 +58,28 @@ namespace Revit.IFC.Import.Data
       /// </summary>
       /// <param name="lcs">The local coordinate system for the surface.  Can be null.</param>
       /// <returns>The surface which defines the internal shape of the face</returns>
-      public virtual Surface GetSurface(Transform lcs)
+      public static Surface GetSurface(this IfcSurface surface, Transform lcs)
       {
+         if(surface is IfcBSplineSurface)
+            throw new InvalidOperationException("Revit doesn't have corresponding surface type for NURBS");
+         IfcElementarySurface elementarySurface = surface as IfcElementarySurface;
+         if (elementarySurface != null)
+         {
+            Transform transform = elementarySurface.Position.GetAxis2Placement3DTransform();
+            XYZ origin = transform.Origin;
+            XYZ xVec = transform.BasisX;
+            XYZ yVec = transform.BasisY;
+            XYZ zVec = transform.BasisZ;
+            IfcCylindricalSurface cylindricalSurface = surface as IfcCylindricalSurface;
+            if (cylindricalSurface != null)
+               return CylindricalSurface.Create(new Frame(lcs.OfPoint(origin), lcs.OfVector(xVec), lcs.OfVector(yVec), lcs.OfVector(zVec)), IFCUnitUtil.ScaleLength(cylindricalSurface.Radius));
+            IfcPlane plane = elementarySurface as IfcPlane;
+            if(plane != null)
+               return Plane.CreateByNormalAndOrigin(lcs.OfVector(zVec), lcs.OfPoint(origin));
+         }
+         IfcSurfaceOfLinearExtrusion surfaceOfLinearExtrusion = surface as IfcSurfaceOfLinearExtrusion;
+         if (surfaceOfLinearExtrusion != null)
+            return surfaceOfLinearExtrusion.GetSurface(lcs);
          return null;
       }
    }

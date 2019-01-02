@@ -28,6 +28,8 @@ using Revit.IFC.Common.Enums;
 using Revit.IFC.Import.Data;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Geometry
 {
    /// <summary>
@@ -234,7 +236,7 @@ namespace Revit.IFC.Import.Geometry
       /// <param name="closeCurve">True if the loop needs a segment between the last point and the first point.</param>
       /// <returns>The new curve loop.</returns>
       /// <remarks>If closeCurve is true, there will be pointsXyz.Count line segments.  Otherwise, there will be pointsXyz.Count-1.</remarks>
-      public static CurveLoop CreatePolyCurveLoop(IList<XYZ> pointXYZs, IList<IFCAnyHandle> points, int id, bool closeCurve)
+      public static CurveLoop CreatePolyCurveLoop(IList<XYZ> pointXYZs, IList<IfcCartesianPoint> points, int id, bool closeCurve)
       {
          int numPoints = pointXYZs.Count;
          if (numPoints < 2)
@@ -417,22 +419,25 @@ namespace Revit.IFC.Import.Geometry
       /// <param name="ifcCurve">The IFCCurve entity containing the CurveLoop to be trimmed.</param>
       /// <param name="curveParamLength">The delta between the start and end parameters of the overall curve.</param>
       /// <returns>False if the trim parameters are thought to be invalid, true otherwise.</returns>
-      private static bool CheckIfTrimParametersAreValidForSomeInvalidities(int id, IFCCurve ifcCurve, double curveParamLength)
+      private static bool CheckIfTrimParametersAreValidForSomeInvalidities(int id, IfcCurve ifcCurve, double curveParamLength)
       {
-         if (!(ifcCurve is IFCCompositeCurve))
+         IfcCompositeCurve compositeCurve = ifcCurve as IfcCompositeCurve;
+         if (compositeCurve == null)
             return true;
 
          double totalRawParametricLength = 0.0;
-         foreach (IFCCurve curveSegment in (ifcCurve as IFCCompositeCurve).Segments)
+         foreach (IfcCurve curveSegment in compositeCurve.Segments.Select(x=>x.ParentCurve))
          {
-            if (!(curveSegment is IFCTrimmedCurve))
+            if (!(curveSegment is IfcTrimmedCurve))
                return true;
 
-            IFCTrimmedCurve trimmedCurveSegment = curveSegment as IFCTrimmedCurve;
-            if (trimmedCurveSegment.Trim1 == null || trimmedCurveSegment.Trim2 == null)
+            IfcTrimmedCurve trimmedCurveSegment = curveSegment as IfcTrimmedCurve;
+
+            IfcTrimmingSelect trim1 = trimmedCurveSegment.Trim1, trim2 = trimmedCurveSegment.Trim2;
+            if (trim1 == null || trim2 == null || double.IsNaN(trim1.IfcParameterValue) || double.IsNaN(trim2.IfcParameterValue))
                return true;
 
-            totalRawParametricLength += (trimmedCurveSegment.Trim2.Value - trimmedCurveSegment.Trim1.Value);
+            totalRawParametricLength += (trim2.IfcParameterValue - trim1.IfcParameterValue);
          }
 
          if (MathUtil.IsAlmostEqual(curveParamLength, totalRawParametricLength))
@@ -455,14 +460,14 @@ namespace Revit.IFC.Import.Geometry
       /// <param name="startVal">The starting trim parameter.</param>
       /// <param name="origEndVal">The optional end trim parameter.  If not supplied, assume no end trim.</param>
       /// <returns>The original curve loop, if no trimming has been done, otherwise a trimmed copy.</returns>
-      public static CurveLoop TrimCurveLoop(int id, IFCCurve ifcCurve, double startVal, double? origEndVal)
+      public static CurveLoop TrimCurveLoop(int id, IfcCurve ifcCurve, double startVal, double? origEndVal)
       {
          CurveLoop origCurveLoop = ifcCurve.GetCurveLoop();
          if (origCurveLoop == null)
             return null;
 
          // Trivial case: no trimming.
-         if (!origEndVal.HasValue && MathUtil.IsAlmostZero(startVal))
+         if ((!origEndVal.HasValue && MathUtil.IsAlmostZero(startVal)) || (double.IsNaN(startVal) || (origEndVal.HasValue && double.IsNaN(origEndVal.Value))))
             return origCurveLoop;
 
          IList<double> curveLengths = new List<double>();

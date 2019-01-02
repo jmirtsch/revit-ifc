@@ -29,118 +29,37 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
-   public class IFCConnectedFaceSet : IFCTopologicalRepresentationItem
+   public static class IFCConnectedFaceSet 
    {
-      ISet<IFCFace> m_CfsFaces = null;
-
-      bool m_AllowInvalidFace = false;
-
-      /// <summary>
-      /// Determines whether or not the connected face set is allowed to have an invalid face.  This can be true if the owner
-      /// is a surface model, and false if it is a solid model.  Regardless, it should log an error.
-      /// </summary>
-      public bool AllowInvalidFace
-      {
-         get { return m_AllowInvalidFace; }
-         set { m_AllowInvalidFace = value; }
-      }
-
-      /// <summary>
-      /// The faces of the connected face set.
-      /// </summary>
-      public ISet<IFCFace> Faces
-      {
-         get
-         {
-            if (m_CfsFaces == null)
-               m_CfsFaces = new HashSet<IFCFace>();
-            return m_CfsFaces;
-         }
-
-      }
-
-      protected IFCConnectedFaceSet()
-      {
-      }
-
-      override protected void Process(IFCAnyHandle ifcConnectedFaceSet)
-      {
-         base.Process(ifcConnectedFaceSet);
-
-         HashSet<IFCAnyHandle> ifcCfsFaces =
-             IFCAnyHandleUtil.GetAggregateInstanceAttribute<HashSet<IFCAnyHandle>>(ifcConnectedFaceSet, "CfsFaces");
-         if (ifcCfsFaces == null || ifcCfsFaces.Count == 0)
-            throw new InvalidOperationException("#" + ifcConnectedFaceSet.StepId + ": no faces in connected face set, aborting.");
-
-         foreach (IFCAnyHandle ifcCfsFace in ifcCfsFaces)
-         {
-            try
-            {
-               Faces.Add(IFCFace.ProcessIFCFace(ifcCfsFace));
-            }
-            catch
-            {
-               Importer.TheLog.LogWarning(ifcCfsFace.StepId, "Invalid face, ignoring.", false);
-            }
-         }
-
-         if (Faces.Count == 0)
-            throw new InvalidOperationException("#" + ifcConnectedFaceSet.StepId + ": no faces, aborting.");
-      }
-
       /// <summary>
       /// Create geometry for a particular representation item.
       /// </summary>
       /// <param name="shapeEditScope">The geometry creation scope.</param>
       /// <param name="lcs">Local coordinate system for the geometry.</param>
       /// <param name="guid">The guid of an element for which represntation is being created.</param>
-      protected override void CreateShapeInternal(IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
+      internal static void CreateShapeConnectedFaceSet(this IfcConnectedFaceSet connectedFaceSet, CreateElementIfcCache cache, IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid, bool allowInvalidFace)
       {
-         base.CreateShapeInternal(shapeEditScope, lcs, scaledLcs, guid);
-
-         foreach (IFCFace face in Faces)
+         foreach (IfcFace face in connectedFaceSet.CfsFaces)
          {
             try
             {
-               face.CreateShape(shapeEditScope, lcs, scaledLcs, guid);
+               face.CreateShapeFace(cache, shapeEditScope, lcs, scaledLcs, guid);
             }
             catch (Exception ex)
             {
-               if (!AllowInvalidFace)
+               if (!allowInvalidFace)
                   throw ex;
                else
                {
                   shapeEditScope.BuilderScope.AbortCurrentFace();
-                  Importer.TheLog.LogError(face.Id, ex.Message, false);
+                  Importer.TheLog.LogError(face.StepId, ex.Message, false);
                }
             }
          }
-      }
-
-      protected IFCConnectedFaceSet(IFCAnyHandle item)
-      {
-         Process(item);
-      }
-
-      /// <summary>
-      /// Create an IFConnectedFaceSet object from a handle of type IfcConnectedFaceSet.
-      /// </summary>
-      /// <param name="ifcConnectedFaceSet">The IFC handle.</param>
-      /// <returns>The IFCConnectedFaceSet object.</returns>
-      public static IFCConnectedFaceSet ProcessIFCConnectedFaceSet(IFCAnyHandle ifcConnectedFaceSet)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcConnectedFaceSet))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcConnectedFaceSet);
-            return null;
-         }
-
-         IFCEntity connectedFaceSet;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcConnectedFaceSet.StepId, out connectedFaceSet))
-            connectedFaceSet = new IFCConnectedFaceSet(ifcConnectedFaceSet);
-         return (connectedFaceSet as IFCConnectedFaceSet);
       }
    }
 }

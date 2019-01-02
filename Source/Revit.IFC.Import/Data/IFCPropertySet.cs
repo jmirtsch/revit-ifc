@@ -28,27 +28,15 @@ using Revit.IFC.Common.Enums;
 using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
    /// <summary>
    /// Represents an IfcPropertySet.
    /// </summary>
-   public class IFCPropertySet : IFCPropertySetDefinition
+   public static class IFCPropertySet
    {
-      /// <summary>
-      /// The contained set of IFC properties.
-      /// </summary>
-      IDictionary<string, IFCProperty> m_IFCProperties;
-
-      /// <summary>
-      /// The properties.
-      /// </summary>
-      public IDictionary<string, IFCProperty> IFCProperties
-      {
-         get { return m_IFCProperties; }
-      }
-
-
       static IDictionary<UnitType, ParameterType> m_UnitToParameterType = null;
 
       static IDictionary<UnitType, ParameterType> UnitToParameterType
@@ -191,62 +179,6 @@ namespace Revit.IFC.Import.Data
 
             return m_UnitToParameterType;
          }
-      }
-
-      /// <summary>
-      /// Processes IfcPropertySet attributes.
-      /// </summary>
-      /// <param name="ifcPropertySet">The IfcPropertySet handle.</param>
-      protected IFCPropertySet(IFCAnyHandle ifcPropertySet)
-      {
-         Process(ifcPropertySet);
-      }
-
-      /// <summary>
-      /// Processes an IFC property set.
-      /// </summary>
-      /// <param name="ifcPropertySet">The IfcPropertySet object.</param>
-      protected override void Process(IFCAnyHandle ifcPropertySet)
-      {
-         base.Process(ifcPropertySet);
-
-         HashSet<IFCAnyHandle> properties = IFCAnyHandleUtil.GetAggregateInstanceAttribute<HashSet<IFCAnyHandle>>(ifcPropertySet, "HasProperties");
-
-         if (properties != null)
-         {
-            m_IFCProperties = new Dictionary<string, IFCProperty>();
-
-            foreach (IFCAnyHandle property in properties)
-            {
-               IFCProperty ifcProperty = IFCProperty.ProcessIFCProperty(property);
-               if (ifcProperty != null)
-                  m_IFCProperties[ifcProperty.Name] = ifcProperty;
-            }
-         }
-         else
-         {
-            Importer.TheLog.LogMissingRequiredAttributeError(ifcPropertySet, "HasProperties", false);
-         }
-      }
-
-      /// <summary>
-      /// Processes an IFC property set.
-      /// </summary>
-      /// <param name="propertySet">The IfcPropertySet object.</param>
-      /// <returns>The IFCPropertySet object.</returns>
-      public static IFCPropertySet ProcessIFCPropertySet(IFCAnyHandle ifcPropertySet)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcPropertySet))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcPropertySet);
-            return null;
-         }
-
-         IFCEntity propertySet;
-         if (IFCImportFile.TheFile.EntityMap.TryGetValue(ifcPropertySet.StepId, out propertySet))
-            return (propertySet as IFCPropertySet);
-
-         return new IFCPropertySet(ifcPropertySet);
       }
 
       // This function should only be necessary while using ExperimentalAddParameter.
@@ -453,7 +385,8 @@ namespace Revit.IFC.Import.Data
       /// <returns>True if the parameter was successfully added, false otherwise.</returns>
       public static bool AddParameterDouble(Document doc, Element element, string parameterName, UnitType unitType, double parameterValue, int parameterSetId)
       {
-
+         if (double.IsNaN(parameterValue))
+            return false;
 
          ParameterType parameterType;
          if (!UnitToParameterType.TryGetValue(unitType, out parameterType))
@@ -496,7 +429,7 @@ namespace Revit.IFC.Import.Data
       /// <param name="parameterValue">The parameter value.</param>
       /// <param name="parameterSetId">The id of the containing parameter set, for reporting errors.</param>
       /// <returns>True if the parameter was successfully added, false otherwise.</returns>
-      public static bool AddParameterString(Document doc, Element element, IFCObjectDefinition objDef, IFCSharedParameters name, string parameterValue, int parameterSetId)
+      public static bool AddParameterString(Document doc, Element element, IfcObjectDefinition objDef, IFCSharedParameters name, string parameterValue, int parameterSetId)
       {
          if (objDef == null)
             return false;
@@ -509,27 +442,6 @@ namespace Revit.IFC.Import.Data
 
          parameter.Set(parameterValue);
          return true;
-      }
-
-      /// <summary>
-      /// Create a property set for a given element.
-      /// </summary>
-      /// <param name="doc">The document.</param>
-      /// <param name="element">The element being created.</param>
-      /// <param name="parameterGroupMap">The parameters of the element.  Cached for performance.</param>
-      /// <returns>The name of the property set created, if it was created, and a Boolean value if it should be added to the property set list.</returns>
-      public override KeyValuePair<string, bool> CreatePropertySet(Document doc, Element element, IFCParameterSetByGroup parameterGroupMap)
-      {
-         string quotedName = "\"" + Name + "\"";
-
-         ISet<string> parametersCreated = new HashSet<string>();
-         foreach (IFCProperty property in IFCProperties.Values)
-         {
-            property.Create(doc, element, parameterGroupMap, Name, parametersCreated);
-         }
-
-         CreateScheduleForPropertySet(doc, element, parameterGroupMap, parametersCreated);
-         return new KeyValuePair<string, bool>(quotedName, true);
       }
    }
 }

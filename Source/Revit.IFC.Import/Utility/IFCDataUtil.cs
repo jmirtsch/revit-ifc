@@ -27,6 +27,8 @@ using Revit.IFC.Common.Utility;
 using Revit.IFC.Common.Enums;
 using Revit.IFC.Import.Data;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Utility
 {
    /// <summary>
@@ -89,21 +91,24 @@ namespace Revit.IFC.Import.Utility
       /// <param name="defaultType">The default value, if no type is found.</param>
       /// <param name="propertyType">The string value of the simple type, returned for logging purposes.</param>
       /// <returns>The unit type.</returns>
-      public static UnitType GetUnitTypeFromData(IFCData data, UnitType defaultType, out string propertyType)
+      public static UnitType GetUnitTypeFromData(IfcValue value, UnitType defaultType, out string propertyType)
       {
          UnitType unitType = UnitType.UT_Undefined;
 
-         if (data.HasSimpleType())
-         {
-            propertyType = data.GetSimpleType();
-            if (!MeasureCache.TryGetValue(propertyType, out unitType))
+
+         //if (data.HasSimpleType())
+         //{
+         
+         propertyType = value.GetType().Name;
+         
+         if (!MeasureCache.TryGetValue(propertyType, out unitType))
                unitType = defaultType;
-         }
-         else
-         {
-            propertyType = "";
-            unitType = defaultType;
-         }
+         //}
+         //else
+         //{
+         //   propertyType = "";
+         //   unitType = defaultType;
+         //}
 
          return unitType;
       }
@@ -114,7 +119,7 @@ namespace Revit.IFC.Import.Utility
       /// <param name="data">The IFC data.</param>
       /// <param name="defaultType">The default value, if no type is found.</param>
       /// <returns>The unit type.</returns>
-      public static UnitType GetUnitTypeFromData(IFCData data, UnitType defaultType)
+      public static UnitType GetUnitTypeFromData(IfcValue data, UnitType defaultType)
       {
          string propertyType;
          return GetUnitTypeFromData(data, defaultType, out propertyType);

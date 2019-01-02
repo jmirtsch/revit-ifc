@@ -29,21 +29,41 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
-   public abstract class IFCSolidModel : IFCRepresentationItem, IIFCBooleanOperand
+   public static class IFCSolidModel
    {
-      protected IFCSolidModel()
+      internal static IList<GeometryObject> CreateGeometrySolidModelInternal(this IfcSolidModel solidModel, CreateElementIfcCache cache,
+         IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
       {
-      }
+         IfcCsgSolid csgSolid = solidModel as IfcCsgSolid;
+         if (csgSolid != null)
+            return csgSolid.CreateGeometryCsgSolid(cache, shapeEditScope, lcs, scaledLcs, guid);
+         IfcManifoldSolidBrep manifoldSolidBrep = solidModel as IfcManifoldSolidBrep;
+         if (manifoldSolidBrep != null)
+            return manifoldSolidBrep.CreateGeometryManifoldSolidBrep(cache, shapeEditScope, lcs, scaledLcs, guid);
+         IfcSweptAreaSolid sweptAreaSolid = solidModel as IfcSweptAreaSolid;
+         if(sweptAreaSolid != null)
+         {
+            IfcExtrudedAreaSolid extrudedAreaSolid = sweptAreaSolid as IfcExtrudedAreaSolid;
+            if (extrudedAreaSolid != null)
+               return extrudedAreaSolid.CreateGeometryExtrudedAreaSolid(cache, shapeEditScope, lcs, scaledLcs, guid);
+            IfcRevolvedAreaSolid revolvedAreaSolid = sweptAreaSolid as IfcRevolvedAreaSolid;
+            if (revolvedAreaSolid != null)
+               return revolvedAreaSolid.CreateGeometryRevolvedAreaSolid(cache, shapeEditScope, lcs, scaledLcs, guid);
+            IfcSurfaceCurveSweptAreaSolid surfaceCurveSweptAreaSolid = sweptAreaSolid as IfcSurfaceCurveSweptAreaSolid;
+            if (surfaceCurveSweptAreaSolid != null)
+               return surfaceCurveSweptAreaSolid.CreateGeometrySurfaceCurveSweptAreaSolid(cache, shapeEditScope, lcs, scaledLcs, guid);
+         }
+         IfcSweptDiskSolid sweptDiskSolid = solidModel as IfcSweptDiskSolid;
+         if(sweptDiskSolid != null)
+            return sweptDiskSolid.CreateGeometrySweptDiskSolid(cache, shapeEditScope, lcs, scaledLcs, guid);
 
-      override protected void Process(IFCAnyHandle ifcSolidModel)
-      {
-         base.Process(ifcSolidModel);
+         Importer.TheLog.LogUnhandledSubTypeError(solidModel, "IfcAxis2Placement", false);
+         return null;
       }
-
-      protected abstract IList<GeometryObject> CreateGeometryInternal(
-         IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid);
 
       /// <summary>
       /// Return geometry for a particular representation item.
@@ -53,58 +73,34 @@ namespace Revit.IFC.Import.Data
       /// <param name="scaledLcs">Local coordinate system for the geometry, including scale, potentially non-uniform.</param>
       /// <param name="guid">The guid of an element for which represntation is being created.</param>
       /// <returns>Zero or more created geometries.</returns>
-      public IList<GeometryObject> CreateGeometry(IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
+      public static IList<GeometryObject> CreateGeometrySolidModel(this IfcSolidModel solidModel, CreateElementIfcCache cache, IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
       {
-         if (StyledByItem != null)
-            StyledByItem.Create(shapeEditScope);
+         IfcStyledItem styledItem = solidModel.StyledByItem;
+         if (styledItem != null)
+            styledItem.Create(shapeEditScope, cache);
 
-         using (IFCImportShapeEditScope.IFCMaterialStack stack = new IFCImportShapeEditScope.IFCMaterialStack(shapeEditScope, StyledByItem, null))
+         using (IFCImportShapeEditScope.IFCMaterialStack stack = new IFCImportShapeEditScope.IFCMaterialStack(shapeEditScope, cache, styledItem, null))
          {
-            return CreateGeometryInternal(shapeEditScope, lcs, scaledLcs, guid);
+            return solidModel.CreateGeometrySolidModelInternal(cache, shapeEditScope, lcs, scaledLcs, guid);
          }
       }
-
       /// <summary>
-      /// In case of a Boolean operation failure, provide a recommended direction to shift the geometry in for a second attempt.
+      /// Create geometry for a particular representation item.
       /// </summary>
-      /// <param name="lcs">The local transform for this entity.</param>
-      /// <returns>An XYZ representing a unit direction vector, or null if no direction is suggested.</returns>
-      /// <remarks>If the 2nd attempt fails, a third attempt will be done with a shift in the opposite direction.</remarks>
-      public XYZ GetSuggestedShiftDirection(Transform lcs)
+      /// <param name="shapeEditScope">The geometry creation scope.</param>
+      /// <param name="lcs">Local coordinate system for the geometry, without scale.</param>
+      /// <param name="scaledLcs">Local coordinate system for the geometry, including scale, potentially non-uniform.</param>
+      /// <param name="guid">The guid of an element for which representation is being created.</param>
+      internal static void CreateShapeSolidModel(this IfcSolidModel solidModel, CreateElementIfcCache cache, IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
       {
-         // Sub-classes may have a better guess.
-         return null;
-      }
-
-      protected IFCSolidModel(IFCAnyHandle item)
-      {
-         Process(item);
-      }
-
-      /// <summary>
-      /// Create an IFCSolidModel object from a handle of type IfcSolidModel.
-      /// </summary>
-      /// <param name="ifcSolidModel">The IFC handle.</param>
-      /// <returns>The IFCSolidModel object.</returns>
-      public static IFCSolidModel ProcessIFCSolidModel(IFCAnyHandle ifcSolidModel)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcSolidModel))
+         IList<GeometryObject> solidGeometries = solidModel.CreateGeometrySolidModel(cache, shapeEditScope, lcs, scaledLcs, guid);
+         if (solidGeometries != null)
          {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcSolidModel);
-            return null;
+            foreach (GeometryObject geometry in solidGeometries)
+            {
+               shapeEditScope.Solids.Add(IFCSolidInfo.Create(solidModel.StepId, geometry));
+            }
          }
-
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcSolidModel, IFCEntityType.IfcCsgSolid))
-            return IFCCSGSolid.ProcessIFCCSGSolid(ifcSolidModel);
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcSolidModel, IFCEntityType.IfcManifoldSolidBrep))
-            return IFCManifoldSolidBrep.ProcessIFCManifoldSolidBrep(ifcSolidModel);
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcSolidModel, IFCEntityType.IfcSweptAreaSolid))
-            return IFCSweptAreaSolid.ProcessIFCSweptAreaSolid(ifcSolidModel);
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcSolidModel, IFCEntityType.IfcSweptDiskSolid))
-            return IFCSweptDiskSolid.ProcessIFCSweptDiskSolid(ifcSolidModel);
-
-         Importer.TheLog.LogUnhandledSubTypeError(ifcSolidModel, IFCEntityType.IfcSolidModel, true);
-         return null;
       }
    }
 }

@@ -27,6 +27,8 @@ using Revit.IFC.Common.Utility;
 using Revit.IFC.Common.Enums;
 using UnitName = Autodesk.Revit.DB.DisplayUnitType;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
    /// <summary>
@@ -37,7 +39,7 @@ namespace Revit.IFC.Import.Data
       /// <summary>
       /// The IFC project units.
       /// </summary>
-      Dictionary<UnitType, IFCUnit> m_ProjectUnitsDictionary = new Dictionary<UnitType, IFCUnit>();
+      internal Dictionary<UnitType, IFCUnit> m_ProjectUnitsDictionary = new Dictionary<UnitType, IFCUnit>();
 
       /// <summary>
       /// Gets the unit of a type.
@@ -104,14 +106,9 @@ namespace Revit.IFC.Import.Data
          return null;
       }
 
-      /// <summary>
-      /// Processes a project unit.
-      /// </summary>
-      /// <param name="unitHnd">The unit handle.</param>
-      /// <returns>The Unit object.</returns>
-      public IFCUnit ProcessIFCProjectUnit(IFCAnyHandle unitHnd)
+      public IFCUnit ProcessIFCProjectUnit(IfcUnit ifcUnit)
       {
-         IFCUnit unit = IFCUnit.ProcessIFCUnit(unitHnd);
+         IFCUnit unit = new IFCUnit(ifcUnit); 
          if (unit != null)
             m_ProjectUnitsDictionary[unit.UnitType] = unit;
 

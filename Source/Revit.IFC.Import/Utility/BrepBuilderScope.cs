@@ -31,6 +31,8 @@ using Revit.IFC.Import.Geometry;
 using UnitSystem = Autodesk.Revit.DB.DisplayUnit;
 using UnitName = Autodesk.Revit.DB.DisplayUnitType;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Utility
 {
    /// <summary>
@@ -87,7 +89,7 @@ namespace Revit.IFC.Import.Utility
       /// <param name="orientation">The flag that indicates (TRUE) if the surface's normal agree with the face's normal or not (FALSE)</param>
       /// <param name="materialId">The face's material ID</param>
       /// <param name="localTransform">The local transform</param>
-      public void StartCollectingFace(IFCSurface surface, Transform localTransform, bool orientation, ElementId materialId)
+      public void StartCollectingFace(IfcSurface surface, Transform localTransform, bool orientation, ElementId materialId)
       {
          if (m_CurrentBrepBuilderFace != null)
          {
@@ -97,9 +99,10 @@ namespace Revit.IFC.Import.Utility
          bool bReversed = !orientation;
          BRepBuilderSurfaceGeometry surfaceGeometry;
 
-         if (surface is IFCBSplineSurfaceWithKnots)
+         IfcBSplineSurfaceWithKnots bSplineSurfaceWithKnots = surface as IfcBSplineSurfaceWithKnots;
+         if (bSplineSurfaceWithKnots != null)
          {
-            surfaceGeometry = StartCollectingNURBSFace(surface as IFCBSplineSurfaceWithKnots, localTransform);
+            surfaceGeometry = StartCollectingNURBSFace(bSplineSurfaceWithKnots, localTransform);
          }
          else
          {
@@ -113,12 +116,12 @@ namespace Revit.IFC.Import.Utility
          BrepBuilder.SetFaceMaterialId(m_CurrentBrepBuilderFace, FaceMaterialId);
       }
 
-      private BRepBuilderSurfaceGeometry StartCollectingNURBSFace(IFCBSplineSurfaceWithKnots bSplineSurfaceWithKnots, Transform localTransform)
+      private BRepBuilderSurfaceGeometry StartCollectingNURBSFace(IfcBSplineSurfaceWithKnots bSplineSurfaceWithKnots, Transform localTransform)
       {
          if (bSplineSurfaceWithKnots == null)
             return null;
 
-         IFCRationalBSplineSurfaceWithKnots rationalBSplineSurfaceWithKnots = (bSplineSurfaceWithKnots as IFCRationalBSplineSurfaceWithKnots);
+         IfcRationalBSplineSurfaceWithKnots rationalBSplineSurfaceWithKnots = (bSplineSurfaceWithKnots as IfcRationalBSplineSurfaceWithKnots);
 
          IList<double> knotsU = IFCGeometryUtil.ConvertIFCKnotsToRevitKnots(bSplineSurfaceWithKnots.UMultiplicities, bSplineSurfaceWithKnots.UKnots);
          if (knotsU == null || knotsU.Count == 0)
@@ -132,10 +135,10 @@ namespace Revit.IFC.Import.Utility
             throw new InvalidOperationException("No knots in v-direction");
          }
 
-         IList<double> weights = (rationalBSplineSurfaceWithKnots != null) ? rationalBSplineSurfaceWithKnots.WeightsList : null;
+         List<double> weights = (rationalBSplineSurfaceWithKnots != null) ? rationalBSplineSurfaceWithKnots.WeightsData.SelectMany(x=>x).ToList() : null;
 
          IList<XYZ> controlPoints = new List<XYZ>();
-         foreach (XYZ point in bSplineSurfaceWithKnots.ControlPointsList)
+         foreach (XYZ point in bSplineSurfaceWithKnots.ControlPointsList.SelectMany(x=>x).Select(x=>IFCUnitUtil.ScaleLength(x.ProcessIFCCartesianPoint())))
          {
             controlPoints.Add(localTransform.OfPoint(point));
          }

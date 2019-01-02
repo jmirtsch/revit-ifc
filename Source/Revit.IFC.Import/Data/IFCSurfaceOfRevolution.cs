@@ -29,98 +29,49 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
    /// <summary>
    /// Class that represents IFCSurfaceOfRevolution entity
    /// </summary>
-   public class IFCSurfaceOfRevolution : IFCSweptSurface
+   public static class IFCSurfaceOfRevolution 
    {
-      private Transform m_AxisPosition;
-
-      /// <summary>
-      /// Get or set the local axis position transform.  This does not include the position transform information.
-      /// </summary>
-      public Transform AxisPosition
-      {
-         get { return m_AxisPosition; }
-         protected set { m_AxisPosition = value; }
-      }
-
-      protected IFCSurfaceOfRevolution()
-      {
-      }
-
-      override protected void Process(IFCAnyHandle ifcSurface)
-      {
-         base.Process(ifcSurface);
-
-         IFCAnyHandle ifcAxisPosition = IFCImportHandleUtil.GetRequiredInstanceAttribute(ifcSurface, "AxisPosition", true);
-         AxisPosition = IFCLocation.ProcessIFCAxis1Placement(ifcAxisPosition);
-
-         if (AxisPosition == null)
-         {
-            Importer.TheLog.LogError(ifcSurface.StepId, "Cannot find the axis position of this surface of revolution", true);
-         }
-      }
-
-      protected IFCSurfaceOfRevolution(IFCAnyHandle surfaceOfRevolution)
-      {
-         Process(surfaceOfRevolution);
-      }
-
-      /// <summary>
-      /// Create an IFCSurfaceOfRevolution object from a handle of type IfcSweptSurface.
-      /// </summary>
-      /// <param name="ifcSurfaceOfRevolution">The IFC handle.</param>
-      /// <returns>The IFCSurfaceOfRevolution object.</returns>
-      public static IFCSurfaceOfRevolution ProcessIFCSurfaceOfRevolution(IFCAnyHandle ifcSurfaceOfRevolution)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcSurfaceOfRevolution))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcSurfaceOfRevolution);
-            return null;
-         }
-
-         IFCEntity surfaceOfRevolution;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcSurfaceOfRevolution.StepId, out surfaceOfRevolution))
-            surfaceOfRevolution = new IFCSurfaceOfRevolution(ifcSurfaceOfRevolution);
-
-         return (surfaceOfRevolution as IFCSurfaceOfRevolution);
-      }
-
       /// <summary>
       /// Returns the surface which defines the internal shape of the face
       /// </summary>
       /// <param name="lcs">The local coordinate system for the surface.  Can be null.</param>
       /// <returns>The surface which defines the internal shape of the face</returns>
-      public override Surface GetSurface(Transform lcs)
+      public static Surface GetSurface(this IfcSurfaceOfRevolution surfaceOfRevolution, Transform lcs, CreateElementIfcCache cache)
       {
-         if (SweptCurve == null)
-            Importer.TheLog.LogError(Id, "Cannot find the profile curve of this revolved face.", true);
+         IfcProfileDef sweptCurve = surfaceOfRevolution.SweptCurve;
+         if (sweptCurve == null)
+            Importer.TheLog.LogError(surfaceOfRevolution.StepId, "Cannot find the profile curve of this revolved face.", true);
 
-         IFCSimpleProfile simpleProfile = SweptCurve as IFCSimpleProfile;
+         IFCSimpleProfile simpleProfile = IFCSimpleProfile.CreateIFCSimpleProfile(sweptCurve, cache);
          if (simpleProfile == null)
-            Importer.TheLog.LogError(Id, "Can't handle profile curve of type " + SweptCurve.GetType() + ".", true);
+            Importer.TheLog.LogError(surfaceOfRevolution.StepId, "Can't handle profile curve of type " + sweptCurve.StepClassName + ".", true);
 
          CurveLoop outerCurve = simpleProfile.OuterCurve;
          Curve profileCurve = (outerCurve != null) ? outerCurve.First<Curve>() : null;
 
          if (profileCurve == null)
-            Importer.TheLog.LogError(Id, "Cannot create the profile curve of this revolved surface.", true);
+            Importer.TheLog.LogError(surfaceOfRevolution.StepId, "Cannot create the profile curve of this revolved surface.", true);
 
          if (outerCurve.Count() > 1)
-            Importer.TheLog.LogError(Id, "Revolved surface has multiple profile curves, ignoring all but first.", false);
+            Importer.TheLog.LogError(surfaceOfRevolution.StepId, "Revolved surface has multiple profile curves, ignoring all but first.", false);
 
-         Curve revolvedSurfaceProfileCurve = profileCurve.CreateTransformed(Position);
-         if (!RevolvedSurface.IsValidProfileCurve(AxisPosition.Origin, AxisPosition.BasisZ, revolvedSurfaceProfileCurve))
-            Importer.TheLog.LogError(Id, "Profile curve is invalid for this revolved surface.", true);
+         Curve revolvedSurfaceProfileCurve = profileCurve.CreateTransformed(surfaceOfRevolution.Position.GetAxis2Placement3DTransform());
+         Transform axisPosition = surfaceOfRevolution.AxisPosition.GetIFCAxis1PlacementTransform();
+         if (!RevolvedSurface.IsValidProfileCurve(axisPosition.Origin, axisPosition.BasisZ, revolvedSurfaceProfileCurve))
+            Importer.TheLog.LogError(surfaceOfRevolution.StepId, "Profile curve is invalid for this revolved surface.", true);
 
          if (lcs == null)
-            return RevolvedSurface.Create(AxisPosition.Origin, AxisPosition.BasisZ, revolvedSurfaceProfileCurve);
+            return RevolvedSurface.Create(axisPosition.Origin, axisPosition.BasisZ, revolvedSurfaceProfileCurve);
 
          Curve transformedRevolvedSurfaceProfileCurve = revolvedSurfaceProfileCurve.CreateTransformed(lcs);
-         return RevolvedSurface.Create(lcs.OfPoint(AxisPosition.Origin), lcs.OfVector(AxisPosition.BasisZ), transformedRevolvedSurfaceProfileCurve);
+         return RevolvedSurface.Create(lcs.OfPoint(axisPosition.Origin), lcs.OfVector(axisPosition.BasisZ), transformedRevolvedSurfaceProfileCurve);
       }
    }
 }

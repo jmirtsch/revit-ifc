@@ -29,22 +29,157 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
    /// <summary>
    /// Interface that contains shared functions for IfcMaterialSelect
    /// </summary>
-   public interface IIFCMaterialSelect
+   public static class IFCMaterialSelect
    {
       /// <summary>
       /// Return the material list for this IFCMaterialSelect.
       /// </summary>
-      IList<IFCMaterial> GetMaterials();
+      public static IList<IfcMaterial> GetMaterials(this IfcMaterialSelect materialSelect)
+      {
+         IfcMaterial material = materialSelect as IfcMaterial;
+         if(material == null)
+         {
+            IfcMaterialConstituent materialConstituent = materialSelect as IfcMaterialConstituent;
+            if (materialConstituent != null)
+               material = materialConstituent.Material;
+            else
+            {
+               IfcMaterialLayer materialLayer = materialSelect as IfcMaterialLayer;
+               if (materialLayer != null)
+                  material = materialLayer.Material;
+               else
+               {
+                  IfcMaterialProfile materialProfile = materialSelect as IfcMaterialProfile;
+                  if (materialProfile != null)
+                     material = materialProfile.Material;
+               }
+            }
+         }
+         if (material != null)
+            return new List<IfcMaterial>() { material };
+         IfcMaterialConstituentSet materialConstituentSet = materialSelect as IfcMaterialConstituentSet;
+         if (materialConstituentSet != null)
+            return materialConstituentSet.GetMaterials();
+         IfcMaterialLayerSet materialLayerSet = materialSelect as IfcMaterialLayerSet;
+         if(materialLayerSet == null)
+         {
+            IfcMaterialLayerSetUsage materialLayerSetUsage = materialSelect as IfcMaterialLayerSetUsage;
+            if (materialLayerSetUsage != null)
+               materialLayerSet = materialLayerSetUsage.ForLayerSet;
+         }
+         if (materialLayerSet != null)
+            return materialLayerSet.GetMaterials();
+         IfcMaterialList materialList = materialSelect as IfcMaterialList;
+         if (materialList != null)
+            return materialList.Materials;
+         IfcMaterialProfileSet materialProfileSet = materialSelect as IfcMaterialProfileSet;
+         if(materialProfileSet == null)
+         {
+            IfcMaterialProfileSetUsage materialProfileSetUsage = materialSelect as IfcMaterialProfileSetUsage;
+            if(materialProfileSetUsage != null)
+            {
+               IfcMaterialProfileSetUsageTapering materialProfileSetUsageTapering = materialSelect as IfcMaterialProfileSetUsageTapering;
+               if(materialProfileSetUsageTapering != null)
+               {
+                  List<IfcMaterial> materials = new List<IfcMaterial>();
+                  materials.AddRange(materialProfileSetUsageTapering.ForProfileSet.GetMaterials());
+                  materials.AddRange(materialProfileSetUsageTapering.ForProfileEndSet.GetMaterials());
+                  return materials;
+               }
+               materialProfileSet = materialProfileSetUsage.ForProfileSet;
+            }
+         }
+         if (materialProfileSet != null)
+            return materialProfileSet.GetMaterials();
+
+         Importer.TheLog.LogUnhandledSubTypeError(materialSelect as BaseClassIfc, "IfcMaterialSelect", false);
+         return null;
+      }
 
       /// <summary>
       /// Create the elements associated with the IFCMaterialSelect.
       /// </summary>
       /// <param name="doc">The document.</param>
-      void Create(Document doc);
+      internal static void Create(this IfcMaterialSelect materialSelect, CreateElementIfcCache cache)
+      {
+         IfcMaterial material = materialSelect as IfcMaterial;
+         if (material == null)
+         {
+            IfcMaterialConstituent materialConstituent = materialSelect as IfcMaterialConstituent;
+            if (materialConstituent != null)
+               material = materialConstituent.Material;
+            else
+            {
+               IfcMaterialLayer materialLayer = materialSelect as IfcMaterialLayer;
+               if (materialLayer != null)
+                  material = materialLayer.Material;
+               else
+               {
+                  IfcMaterialProfile materialProfile = materialSelect as IfcMaterialProfile;
+                  if (materialProfile != null)
+                     material = materialProfile.Material;
+               }
+            }
+         }
+         if (material != null)
+            material.Create(cache);
+         else
+         {
+            IfcMaterialConstituentSet materialConstituentSet = materialSelect as IfcMaterialConstituentSet;
+            if (materialConstituentSet != null)
+               materialConstituentSet.Create(cache);
+            else
+            {
+               IfcMaterialLayerSet materialLayerSet = materialSelect as IfcMaterialLayerSet;
+               if(materialLayerSet == null)
+               {
+                  IfcMaterialLayerSetUsage materialLayerSetUsage = materialSelect as IfcMaterialLayerSetUsage;
+                  if (materialLayerSetUsage != null)
+                     materialLayerSet = materialLayerSetUsage.ForLayerSet;
+               }
+               if (materialLayerSet != null)
+                  materialLayerSet.Create(cache);
+               else
+               {
+                  IfcMaterialList materialList = materialSelect as IfcMaterialList;
+                  if(materialList != null)
+                  {
+                     foreach (IfcMaterial m in materialList.Materials)
+                        m.Create(cache);
+                  }
+                  else
+                  {
+                     IfcMaterialProfileSet materialProfileSet = materialSelect as IfcMaterialProfileSet;
+                     if(materialProfileSet == null)
+                     {
+                        IfcMaterialProfileSetUsage materialProfileSetUsage = materialSelect as IfcMaterialProfileSetUsage;
+                        if(materialProfileSetUsage != null)
+                        {
+                           IfcMaterialProfileSetUsageTapering materialProfileSetUsageTapering = materialProfileSetUsage as IfcMaterialProfileSetUsageTapering;
+                           if (materialProfileSetUsageTapering != null)
+                              materialProfileSetUsageTapering.ForProfileEndSet.Create(cache);
+                           materialProfileSet = materialProfileSetUsage.ForProfileSet;
+                        }
+                     }
+                     if (materialProfileSet != null)
+                        materialProfileSet.Create(cache);
+                     else
+                     {
+                        Importer.TheLog.LogUnhandledSubTypeError(materialSelect as BaseClassIfc, "IfcMaterialSelect", false);
+                     }
+                        
+                  }
+               }
+            }
+         }
+
+      }
    }
 }

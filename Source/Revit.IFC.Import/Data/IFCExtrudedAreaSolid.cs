@@ -30,67 +30,12 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
-   public class IFCExtrudedAreaSolid : IFCSweptAreaSolid
+   public static class IFCExtrudedAreaSolid
    {
-      XYZ m_Direction = null;
-
-      double m_Depth = 0.0;
-
-      /// <summary>
-      /// The direction of the extrusion in the local coordinate system.
-      /// </summary>
-      public XYZ Direction
-      {
-         get { return m_Direction; }
-         protected set { m_Direction = value; }
-      }
-
-      /// <summary>
-      /// The depth of the extrusion, along the extrusion direction.
-      /// </summary>
-      public double Depth
-      {
-         get { return m_Depth; }
-         protected set { m_Depth = value; }
-      }
-
-      protected IFCExtrudedAreaSolid()
-      {
-      }
-
-      override protected void Process(IFCAnyHandle solid)
-      {
-         base.Process(solid);
-
-         // We will not fail if the direction is not given, but instead assume it to be normal to the swept area.
-         IFCAnyHandle direction = IFCImportHandleUtil.GetRequiredInstanceAttribute(solid, "ExtrudedDirection", false);
-         if (direction != null)
-            Direction = IFCPoint.ProcessNormalizedIFCDirection(direction);
-         else
-            Direction = XYZ.BasisZ;
-
-         bool found = false;
-         Depth = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(solid, "Depth", out found);
-         if (found && Depth < 0.0)
-         {
-            // Reverse depth and orientation.
-            if (Application.IsValidThickness(-Depth))
-            {
-               Depth = -Depth;
-               Direction = -Direction;
-               Importer.TheLog.LogWarning(solid.StepId, "negative extrusion depth is invalid, reversing direction.", false);
-            }
-         }
-
-         if (!found || !Application.IsValidThickness(Depth))
-         {
-            string depthAsString = IFCUnitUtil.FormatLengthAsString(Depth);
-            Importer.TheLog.LogError(solid.StepId, "extrusion depth of " + depthAsString + " is invalid, aborting.", true);
-         }
-      }
-
       /// <summary>
       /// Get the curve from the Axis representation of the given IfcProduct, transformed to the current local coordinate system.
       /// </summary>
@@ -100,50 +45,42 @@ namespace Revit.IFC.Import.Data
       /// <remarks>In this case, we only allow bounded lines and arcs to be valid axis curves, as per IFC2x3 convention.
       /// The Curve may be contained as either a single Curve in the IFCCurve representation item, or it could be an
       /// open CurveLoop with one item.</remarks>
-      private Curve GetAxisCurve(IFCProduct creator, Transform lcs)
+      private static Curve GetAxisCurve(this IfcExtrudedAreaSolid extrudedAreaSolid, IfcProduct creator, Transform lcs)
       {
          // We need an axis curve to clip the extrusion profiles; if we can't get one, fail
-         IFCProductRepresentation productRepresentation = creator.ProductRepresentation;
+         IfcProductRepresentation productRepresentation = creator.Representation;
          if (productRepresentation == null)
             return null;
 
-         IList<IFCRepresentation> representations = productRepresentation.Representations;
+         IList<IfcRepresentation> representations = productRepresentation.Representations;
          if (representations == null)
             return null;
 
-         foreach (IFCRepresentation representation in representations)
+         foreach (IfcRepresentation representation in representations)
          {
             // Go through the list of representations for this product, to find the Axis representation.
-            if (representation == null || representation.Identifier != IFCRepresentationIdentifier.Axis)
-               continue;
-
-            IList<IFCRepresentationItem> items = representation.RepresentationItems;
-            if (items == null)
+            if (representation == null || string.Compare(representation.RepresentationIdentifier, IFCRepresentationIdentifier.Axis.ToString(),true) != 0)
                continue;
 
             // Go through the list of representation items in the Axis representation, to look for the IfcCurve.
-            foreach (IFCRepresentationItem item in items)
+            foreach (IfcCurve curve in representation.Items.OfType<IfcCurve>())
             {
-               if (item is IFCCurve)
+               // We will accept either a bounded Curve of type Line or Arc, 
+               // or an open CurveLoop with one curve that satisfies the same condition.
+               Curve axisCurve = curve.Curve();
+               if (axisCurve == null)
                {
-                  // We will accept either a bounded Curve of type Line or Arc, 
-                  // or an open CurveLoop with one curve that satisfies the same condition.
-                  IFCCurve ifcCurve = item as IFCCurve;
-                  Curve axisCurve = ifcCurve.Curve;
-                  if (axisCurve == null)
+                  CurveLoop axisCurveLoop = curve.CurveLoop();
+                  if (axisCurveLoop != null && axisCurveLoop.IsOpen() && axisCurveLoop.Count() == 1)
                   {
-                     CurveLoop axisCurveLoop = ifcCurve.CurveLoop;
-                     if (axisCurveLoop != null && axisCurveLoop.IsOpen() && axisCurveLoop.Count() == 1)
-                     {
-                        axisCurve = axisCurveLoop.First();
-                        if (!(axisCurve is Line || axisCurve is Arc))
-                           axisCurve = null;
-                     }
+                     axisCurve = axisCurveLoop.First();
+                     if (!(axisCurve is Line || axisCurve is Arc))
+                        axisCurve = null;
                   }
-
-                  if (axisCurve != null)
-                     return axisCurve.CreateTransformed(lcs);
                }
+
+               if (axisCurve != null)
+                  return axisCurve.CreateTransformed(lcs);
             }
          }
 
@@ -152,7 +89,7 @@ namespace Revit.IFC.Import.Data
 
       // Determines if two curves are oriented in generally opposite directions. Currently only handles lines and arcs.
       // This is intended to determine if two curves have reverse parametrization, so isn't intended to be exhaustive.
-      private bool? CurvesHaveOppositeOrientation(Curve firstCurve, Curve secondCurve)
+      private static bool? CurvesHaveOppositeOrientation(Curve firstCurve, Curve secondCurve)
       {
          if (firstCurve == null || secondCurve == null)
             return null;
@@ -181,7 +118,7 @@ namespace Revit.IFC.Import.Data
       /// 3. The curve (of the same type as the first) at the boundary of the last material layer, oriented in the opposite direction as the Axis curve.
       /// 4. The line, possibly slanted, representing an end cap and connecting the 3rd curve to the 1st curve.
       /// Over time, we may increase the number of cases suported.</remarks>
-      private IList<Curve> GetOrientedCurveList(IList<CurveLoop> loops, Curve axisCurve, XYZ offsetNorm, double offset, double totalThickness)
+      private static IList<Curve> GetOrientedCurveList(IList<CurveLoop> loops, Curve axisCurve, XYZ offsetNorm, double offset, double totalThickness)
       {
          // We are going to limit our attempts to a fairly simple but common case:
          // 1. 2 bounded curves parallel to the axis curve, of the same type, and either Lines or Arcs.
@@ -261,8 +198,8 @@ namespace Revit.IFC.Import.Data
       // 2. No IfcMaterialLayerUsage.
       // 3. The IfcMaterialLayerUsage isn't handled.
       // If the reason is #1 or #3, we want to warn the user.  If it is #2, we don't.  Pass back shouldWarn to let the caller know.
-      private IList<GeometryObject> CreateGeometryFromMaterialLayerUsage(IFCImportShapeEditScope shapeEditScope, Transform extrusionPosition,
-          IList<CurveLoop> loops, XYZ extrusionDirection, double currDepth, out ElementId materialId, out bool shouldWarn)
+      private static IList<GeometryObject> CreateGeometryFromMaterialLayerUsage(this IfcExtrudedAreaSolid extrudedAreaSolid, IfcMaterialLayerSetUsage materialLayerSetUsage, IFCImportShapeEditScope shapeEditScope, Transform extrusionPosition,
+          IList<CurveLoop> loops, XYZ extrusionDirection, double currDepth, out ElementId materialId, out bool shouldWarn, CreateElementIfcCache cache)
       {
          IList<GeometryObject> extrusionSolids = null;
          materialId = ElementId.InvalidElementId;
@@ -281,38 +218,32 @@ namespace Revit.IFC.Import.Data
                 !Application.IsValidThickness(currDepth))
                return null;
 
-            IFCProduct creator = shapeEditScope.Creator;
+            IfcProduct creator = shapeEditScope.Creator as IfcProduct;
             if (creator == null)
                return null;
 
             shouldWarn = false;  // Missing, empty, or optimized out IfcMaterialLayerSetUsage - valid reason to stop.
 
-            IIFCMaterialSelect materialSelect = creator.MaterialSelect;
-            if (materialSelect == null)
-               return null;
-
-            IFCMaterialLayerSetUsage materialLayerSetUsage = materialSelect as IFCMaterialLayerSetUsage;
             if (materialLayerSetUsage == null)
                return null;
 
-            IFCMaterialLayerSet materialLayerSet = materialLayerSetUsage.MaterialLayerSet;
+            IfcMaterialLayerSet materialLayerSet = materialLayerSetUsage.ForLayerSet;
             if (materialLayerSet == null)
                return null;
 
-            IList<IFCMaterialLayer> materialLayers = materialLayerSet.MaterialLayers;
+            IList<IfcMaterialLayer> materialLayers = materialLayerSet.MaterialLayers;
             if (materialLayers == null || materialLayers.Count == 0)
                return null;
 
             // Optimization: if there is only one layer, use the standard method, with possibly an overloaded material.
-            ElementId baseMaterialId = GetMaterialElementId(shapeEditScope);
+            ElementId baseMaterialId = extrudedAreaSolid.GetMaterialElementId(cache, shapeEditScope);
             if (materialLayers.Count == 1)
             {
-               IFCMaterial oneMaterial = materialLayers[0].Material;
+               IfcMaterial oneMaterial = materialLayers[0].Material;
                if (oneMaterial == null)
                   return null;
 
-               materialId = oneMaterial.GetMaterialElementId();
-               if (materialId != ElementId.InvalidElementId)
+               if (cache.CreatedElements.TryGetValue(oneMaterial.StepId, out baseMaterialId) && materialId != ElementId.InvalidElementId)
                {
                   // We will not override the material of the element if the layer material has no color.
                   if (Importer.TheCache.MaterialsWithNoColor.Contains(materialId))
@@ -327,9 +258,9 @@ namespace Revit.IFC.Import.Data
             // an error condition.
             shouldWarn = true;
 
-            IList<IFCMaterialLayer> realMaterialLayers = new List<IFCMaterialLayer>();
+            IList<IfcMaterialLayer> realMaterialLayers = new List<IfcMaterialLayer>();
             double totalThickness = 0.0;
-            foreach (IFCMaterialLayer materialLayer in materialLayers)
+            foreach (IfcMaterialLayer materialLayer in materialLayers)
             {
                double depth = materialLayer.LayerThickness;
                if (MathUtil.IsAlmostZero(depth))
@@ -343,7 +274,7 @@ namespace Revit.IFC.Import.Data
             }
 
             // Axis3 means that the material layers are stacked in the Z direction.  This is common for floor slabs.
-            bool isAxis3 = (materialLayerSetUsage.Direction == IFCLayerSetDirection.Axis3);
+            bool isAxis3 = (materialLayerSetUsage.LayerSetDirection == IfcLayerSetDirectionEnum.AXIS3);
 
             // For elements extruded in the Z direction, if the extrusion layers don't have the same thickness as the extrusion,
             // this could be one of two reasons:
@@ -351,7 +282,7 @@ namespace Revit.IFC.Import.Data
             // 2. There are multiple extrusions in the body definition.
             // In either case, we will use the extrusion geometry over the calculated material layer set usage geometry.
             // In the future, we may decide to allow for case #1 by passing in a flag to allow for this.
-            if (isAxis3 && !MathUtil.IsAlmostEqual(totalThickness, currDepth))
+            if (isAxis3 && !MathUtil.IsAlmostEqual(IFCUnitUtil.ScaleLength(totalThickness), currDepth))
             {
                shouldWarn = false;
                return null;
@@ -361,7 +292,7 @@ namespace Revit.IFC.Import.Data
             if (numLayers == 0)
                return null;
             // We'll use this initial value for the Axis2 case, so read it here.
-            double baseOffsetForLayer = materialLayerSetUsage.Offset;
+            double baseOffsetForLayer = materialLayerSetUsage.OffsetFromReferenceLine;
 
             // Needed for Axis2 case only.  The axisCurve is the curve defined in the product representation representing
             // a base curve (an axis) for the footprint of the element.
@@ -378,9 +309,9 @@ namespace Revit.IFC.Import.Data
             {
                // Axis2 means that the material layers are stacked inthe Y direction.  This is by definition for IfcWallStandardCase,
                // which has a local coordinate system whose Y direction is orthogonal to the length of the wall.
-               if (materialLayerSetUsage.Direction == IFCLayerSetDirection.Axis2)
+               if (materialLayerSetUsage.LayerSetDirection == IfcLayerSetDirectionEnum.AXIS2)
                {
-                  axisCurve = GetAxisCurve(creator, extrusionPosition);
+                  axisCurve = extrudedAreaSolid.GetAxisCurve(creator, extrusionPosition);
                   if (axisCurve == null)
                      return null;
 
@@ -394,7 +325,7 @@ namespace Revit.IFC.Import.Data
 
             extrusionSolids = new List<GeometryObject>();
 
-            bool positiveOrientation = (materialLayerSetUsage.DirectionSense == IFCDirectionSense.Positive);
+            bool positiveOrientation = (materialLayerSetUsage.DirectionSense == IfcDirectionSenseEnum.POSITIVE);
 
             // Always extrude in the positive direction for Axis2.
             XYZ materialExtrusionDirection = (positiveOrientation || !isAxis3) ? extrusionDirection : -extrusionDirection;
@@ -412,7 +343,7 @@ namespace Revit.IFC.Import.Data
 
             for (int ii = 0; ii < numLayers; ii++)
             {
-               IFCMaterialLayer materialLayer = materialLayers[ii];
+               IfcMaterialLayer materialLayer = materialLayers[ii];
 
                // Ignore 0 thickness layers.  No need to warn.
                double depth = materialLayer.LayerThickness;
@@ -535,8 +466,10 @@ namespace Revit.IFC.Import.Data
                }
 
                // Determine the material id.
-               IFCMaterial material = materialLayer.Material;
-               ElementId layerMaterialId = (material == null) ? ElementId.InvalidElementId : material.GetMaterialElementId();
+               IfcMaterial material = materialLayer.Material;
+               ElementId layerMaterialId = ElementId.InvalidElementId;
+               if (material == null || !cache.CreatedElements.TryGetValue(material.StepId, out layerMaterialId))
+                  layerMaterialId = ElementId.InvalidElementId;
 
                // The second option here is really for Referencing.  Without a UI (yet) to determine whether to show the base
                // extusion or the layers for objects with material layer sets, we've chosen to display the base material if the layer material
@@ -568,8 +501,8 @@ namespace Revit.IFC.Import.Data
          return extrusionSolids;
       }
 
-      private GeometryObject CreateGeometryFromMaterialProfile(IFCImportShapeEditScope shapeEditScope,
-         IList<CurveLoop> loops, XYZ extrusionDirection, double currDepth, SolidOptions solidOptions, out bool shouldWarn)
+      private static GeometryObject CreateGeometryFromMaterialProfile(this IfcExtrudedAreaSolid extrudedAreaSolid, IfcMaterialProfileSet materialProfileSet, IFCImportShapeEditScope shapeEditScope,
+         IList<CurveLoop> loops, XYZ extrusionDirection, double currDepth, SolidOptions solidOptions, out bool shouldWarn, CreateElementIfcCache cache)
       {
          GeometryObject extrusionSolid = null;
 
@@ -577,19 +510,8 @@ namespace Revit.IFC.Import.Data
          {
             shouldWarn = true;   // invalid input
 
-            IIFCMaterialSelect materialSelect = shapeEditScope.Creator.MaterialSelect;
-            if (materialSelect == null)
-               return null;
 
-            IFCMaterialProfileSetUsage matProfSetUsage = materialSelect as IFCMaterialProfileSetUsage;
-            if (matProfSetUsage == null)
-               return null;
-
-            IFCMaterialProfileSet matProfSet = matProfSetUsage.ForProfileSet;
-            if (matProfSet == null)
-               return null;
-
-            IList<IFCMaterialProfile> matProfList = matProfSet.MaterialProfileSet;
+            IList<IfcMaterialProfile> matProfList = materialProfileSet.MaterialProfiles;
             if (matProfList.Count == 0)
                return null;
 
@@ -597,26 +519,27 @@ namespace Revit.IFC.Import.Data
             IList<CurveLoop> newloops = new List<CurveLoop>();
 
             ElementId materialId = null;
-            foreach (IFCMaterialProfile matProf in matProfList)
+            foreach (IfcMaterialProfile matProf in matProfList)
             {
-               if (this.SweptArea.Id == matProf.Profile.Id)
+               if (extrudedAreaSolid.SweptArea.StepId == matProf.Profile.StepId)
                {
                   // This is the same id (same profile), use the material name for creation of this geometry
-                  IFCMaterial theMaterial = matProf.Material;
+                  IfcMaterial theMaterial = matProf.Material;
                   if (theMaterial != null)
                   {
-                     materialId = theMaterial.GetMaterialElementId();
+                     cache.CreatedElements.TryGetValue(theMaterial.StepId, out materialId);
+                     if(materialId != ElementId.InvalidElementId)
                      solidOptions.MaterialId = materialId;    // Override the original option if the profile has a specific material id
                   }
 
                   // Here we will handle special case if the Material Profile has Offset
-                  if (matProf is IFCMaterialProfileWithOffsets)
+                  IfcMaterialProfileWithOffsets materialProfileWithOffsets = matProf as IfcMaterialProfileWithOffsets;
+                  if (materialProfileWithOffsets != null)
                   {
-                     IFCMaterialProfileWithOffsets matProfOffset = matProf as IFCMaterialProfileWithOffsets;
-                     double startOffset = matProfOffset.OffsetValues[0];
+                     double startOffset = materialProfileWithOffsets.OffsetValues[0];
                      double endOffset = 0;
-                     if (matProfOffset.OffsetValues.Count > 1)
-                        endOffset = matProfOffset.OffsetValues[1];
+                     if (materialProfileWithOffsets.OffsetValues.Length > 1)
+                        endOffset = materialProfileWithOffsets.OffsetValues[1];
 
                      // To handle offset, we need to move the start point (extrusion position) to the startOffset value along the axis (extrusion direction)
                      // For the end offset, we will have to re-calculate the extrusion
@@ -656,24 +579,43 @@ namespace Revit.IFC.Import.Data
       /// <returns>One or more created geometries.</returns>
       /// <remarks>The scaledLcs is only partially supported in this routine; it allows scaling the depth of the extrusion,
       /// which is commonly found in ACA files.</remarks>
-      protected override IList<GeometryObject> CreateGeometryInternal(
+      internal static IList<GeometryObject> CreateGeometryExtrudedAreaSolid(this IfcExtrudedAreaSolid extrudedAreaSolid, CreateElementIfcCache cache,
             IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
       {
-         if (Direction == null)
+         XYZ direction = extrudedAreaSolid.ExtrudedDirection.ProcessNormalizedIFCDirection();
+         if (direction == null)
          {
-            Importer.TheLog.LogError(Id, "Error processing IfcExtrudedAreaSolid, can't create geometry.", false);
-            return null;
+         // We will not fail if the direction is not given, but instead assume it to be normal to the swept area.
+            direction = XYZ.BasisZ;
+         }
+         double depth = IFCUnitUtil.ScaleLength(extrudedAreaSolid.Depth);
+         if (depth < 0.0)
+         {
+            // Reverse depth and orientation.
+            if (Application.IsValidThickness(-depth))
+            {
+               depth = -depth;
+               direction = -direction;
+               Importer.TheLog.LogWarning(extrudedAreaSolid.StepId, "negative extrusion depth is invalid, reversing direction.", false);
+            }
+           
+         }
+
+         if (depth < 0 || !Application.IsValidThickness(depth))
+         {
+            string depthAsString = IFCUnitUtil.FormatLengthAsString(depth);
+            Importer.TheLog.LogError(extrudedAreaSolid.StepId, "extrusion depth of " + depthAsString + " is invalid, aborting.", true);
          }
 
          Transform origLCS = (lcs == null) ? Transform.Identity : lcs;
          Transform origScaledLCS = (scaledLcs == null) ? Transform.Identity : scaledLcs;
 
-         Transform unscaledExtrusionPosition = (Position == null) ? origLCS : origLCS.Multiply(Position);
-         Transform scaledExtrusionPosition = (Position == null) ? origScaledLCS : origScaledLCS.Multiply(Position);
+         Transform unscaledExtrusionPosition = origLCS.Multiply(extrudedAreaSolid.Position.GetAxis2Placement3DTransformUnscaled());
+         Transform scaledExtrusionPosition = origScaledLCS.Multiply(extrudedAreaSolid.Position.GetAxis2Placement3DTransform());
 
-         XYZ scaledExtrusionDirection = scaledExtrusionPosition.OfVector(Direction);
+         XYZ scaledExtrusionDirection = scaledExtrusionPosition.OfVector(direction);
 
-         ISet<IList<CurveLoop>> disjointLoops = GetTransformedCurveLoops(unscaledExtrusionPosition, scaledExtrusionPosition);
+         ISet<IList<CurveLoop>> disjointLoops = extrudedAreaSolid.GetTransformedCurveLoops(unscaledExtrusionPosition, scaledExtrusionPosition, cache);
          if (disjointLoops == null || disjointLoops.Count() == 0)
             return null;
 
@@ -681,9 +623,9 @@ namespace Revit.IFC.Import.Data
 
          foreach (IList<CurveLoop> loops in disjointLoops)
          {
-            SolidOptions solidOptions = new SolidOptions(GetMaterialElementId(shapeEditScope), shapeEditScope.GraphicsStyleId);
-            XYZ scaledDirection = scaledExtrusionPosition.OfVector(Direction);
-            double currDepth = Depth * scaledDirection.GetLength();
+            SolidOptions solidOptions = new SolidOptions(extrudedAreaSolid.GetMaterialElementId(cache, shapeEditScope), shapeEditScope.GraphicsStyleId);
+            XYZ scaledDirection = scaledExtrusionPosition.OfVector(direction);
+            double currDepth = depth * scaledDirection.GetLength();
 
             GeometryObject extrusionObject = null;
             try
@@ -691,17 +633,19 @@ namespace Revit.IFC.Import.Data
                // We may try to create separate extrusions, one per layer here.
                bool shouldWarn = false;
                ElementId overrideMaterialId = ElementId.InvalidElementId;
-
-               if (shapeEditScope.Creator.MaterialSelect != null)
+               IfcMaterialSelect materialSelect = shapeEditScope.Creator.MaterialSelect();
+               if (materialSelect != null)
                {
-                  if (shapeEditScope.Creator.MaterialSelect is IFCMaterialLayerSetUsage)
+                  IfcMaterialLayerSetUsage materialLayerSetUsage = materialSelect as IfcMaterialLayerSetUsage;
+                  IfcMaterialProfileSetUsage materialProfileSetUsage = materialSelect as IfcMaterialProfileSetUsage;
+                  if (materialLayerSetUsage != null)
                   {
-                     IList<GeometryObject> extrusionLayers = CreateGeometryFromMaterialLayerUsage(shapeEditScope, scaledExtrusionPosition, loops,
-                        scaledExtrusionDirection, currDepth, out overrideMaterialId, out shouldWarn);
+                     IList<GeometryObject> extrusionLayers = extrudedAreaSolid.CreateGeometryFromMaterialLayerUsage(materialLayerSetUsage, shapeEditScope, scaledExtrusionPosition, loops,
+                        scaledExtrusionDirection, currDepth, out overrideMaterialId, out shouldWarn, cache);
                      if (extrusionLayers == null || extrusionLayers.Count == 0)
                      {
                         if (shouldWarn)
-                           Importer.TheLog.LogWarning(Id, "Couldn't process associated IfcMaterialLayerSetUsage, using body geometry instead.", false);
+                           Importer.TheLog.LogWarning(extrudedAreaSolid.StepId, "Couldn't process associated IfcMaterialLayerSetUsage, using body geometry instead.", false);
                         if (overrideMaterialId != ElementId.InvalidElementId)
                            solidOptions.MaterialId = overrideMaterialId;
                         extrusionObject = GeometryCreationUtilities.CreateExtrusionGeometry(loops, scaledExtrusionDirection, currDepth, solidOptions);
@@ -712,9 +656,9 @@ namespace Revit.IFC.Import.Data
                            extrusions.Add(extrusionLayer);
                      }
                   }
-                  else if (shapeEditScope.Creator.MaterialSelect is IFCMaterialProfileSetUsage)
+                  else if (materialProfileSetUsage != null)
                   {
-                     extrusionObject = CreateGeometryFromMaterialProfile(shapeEditScope, loops, scaledExtrusionDirection, currDepth, solidOptions, out shouldWarn);
+                     extrusionObject = extrudedAreaSolid.CreateGeometryFromMaterialProfile(materialProfileSetUsage.ForProfileSet, shapeEditScope, loops, scaledExtrusionDirection, currDepth, solidOptions, out shouldWarn, cache);
                      if (extrusionObject == null)
                         extrusionObject = GeometryCreationUtilities.CreateExtrusionGeometry(loops, scaledExtrusionDirection, currDepth, solidOptions);
                   }
@@ -733,10 +677,10 @@ namespace Revit.IFC.Import.Data
                if (shapeEditScope.MustCreateSolid())
                   throw ex;
 
-               Importer.TheLog.LogError(Id, "Extrusion has an invalid definition for a solid; reverting to mesh.", false);
+               Importer.TheLog.LogError(extrudedAreaSolid.StepId, "Extrusion has an invalid definition for a solid; reverting to mesh.", false);
 
                MeshFromGeometryOperationResult meshResult = TessellatedShapeBuilder.CreateMeshByExtrusion(
-                  loops, scaledExtrusionDirection, currDepth, GetMaterialElementId(shapeEditScope));
+                  loops, scaledExtrusionDirection, currDepth, extrudedAreaSolid.GetMaterialElementId(cache, shapeEditScope));
 
                // will throw if mesh is not available
                extrusionObject = meshResult.GetMesh();
@@ -747,51 +691,6 @@ namespace Revit.IFC.Import.Data
          }
 
          return extrusions;
-      }
-
-      /// <summary>
-      /// Create geometry for a particular representation item.
-      /// </summary>
-      /// <param name="shapeEditScope">The geometry creation scope.</param>
-      /// <param name="lcs">Local coordinate system for the geometry, without scale.</param>
-      /// <param name="scaledLcs">Local coordinate system for the geometry, including scale, potentially non-uniform.</param>
-      /// <param name="guid">The guid of an element for which represntation is being created.</param>
-      protected override void CreateShapeInternal(IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
-      {
-         base.CreateShapeInternal(shapeEditScope, lcs, scaledLcs, guid);
-
-         IList<GeometryObject> extrudedGeometries = CreateGeometryInternal(shapeEditScope, lcs, scaledLcs, guid);
-         if (extrudedGeometries != null)
-         {
-            foreach (GeometryObject extrudedGeometry in extrudedGeometries)
-            {
-               shapeEditScope.AddGeometry(IFCSolidInfo.Create(Id, extrudedGeometry));
-            }
-         }
-      }
-
-      protected IFCExtrudedAreaSolid(IFCAnyHandle solid)
-      {
-         Process(solid);
-      }
-
-      /// <summary>
-      /// Create an IFCExtrudedAreaSolid object from a handle of type IfcExtrudedAreaSolid.
-      /// </summary>
-      /// <param name="ifcSolid">The IFC handle.</param>
-      /// <returns>The IFCExtrudedAreaSolid object.</returns>
-      public static IFCExtrudedAreaSolid ProcessIFCExtrudedAreaSolid(IFCAnyHandle ifcSolid)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcSolid))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcExtrudedAreaSolid);
-            return null;
-         }
-
-         IFCEntity solid;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcSolid.StepId, out solid))
-            solid = new IFCExtrudedAreaSolid(ifcSolid);
-         return (solid as IFCExtrudedAreaSolid);
       }
    }
 }

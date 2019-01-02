@@ -29,25 +29,13 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
-   public class IFCManifoldSolidBrep : IFCSolidModel, IIFCBooleanOperand
+   public static class IFCManifoldSolidBrep
    {
-      IFCClosedShell m_Outer = null;
-
-      /// <summary>
-      /// The outer shell of the solid.
-      /// </summary>
-      public IFCClosedShell Outer
-      {
-         get { return m_Outer; }
-         protected set { m_Outer = value; }
-      }
-
-      protected IFCManifoldSolidBrep()
-      {
-      }
-
       /// <summary>
       /// Return geometry for a particular representation item.
       /// </summary>
@@ -56,12 +44,20 @@ namespace Revit.IFC.Import.Data
       /// <param name="scaledLcs">Local coordinate system for the geometry, including scale, potentially non-uniform.</param>
       /// <param name="guid">The guid of an element for which represntation is being created.</param>
       /// <returns>The created geometry.</returns>
-      protected override IList<GeometryObject> CreateGeometryInternal(
+      internal static IList<GeometryObject> CreateGeometryManifoldSolidBrep(this IfcManifoldSolidBrep manifoldSolidBrep, CreateElementIfcCache cache,
          IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
       {
-         if (Outer == null || Outer.Faces.Count == 0)
+         IfcAdvancedBrep advancedBrep = manifoldSolidBrep as IfcAdvancedBrep;
+         if (advancedBrep != null)
+            return advancedBrep.CreateGeometryAdvancedBrep(cache, shapeEditScope, lcs, scaledLcs, guid);
+
+         IfcClosedShell outer = manifoldSolidBrep.Outer;
+         if (outer == null)
             return null;
 
+         int faceCount = outer.CfsFaces.Count;
+         if (faceCount == 0)
+            return null;
          IList<GeometryObject> geomObjs = null;
          bool canRevertToMesh = false;
 
@@ -70,9 +66,9 @@ namespace Revit.IFC.Import.Data
             TessellatedShapeBuilderScope tsBuilderScope = bs as TessellatedShapeBuilderScope;
 
             tsBuilderScope.StartCollectingFaceSet();
-            Outer.CreateShape(shapeEditScope, lcs, scaledLcs, guid);
+            outer.CreateShapeConnectedFaceSet(cache, shapeEditScope, lcs, scaledLcs, guid, false);
 
-            if (tsBuilderScope.CreatedFacesCount == Outer.Faces.Count)
+            if (tsBuilderScope.CreatedFacesCount == faceCount)
             {
                geomObjs = tsBuilderScope.CreateGeometry(guid);
             }
@@ -94,14 +90,14 @@ namespace Revit.IFC.Import.Data
                      // Let's see if we can loosen the requirements a bit, and try again.
                      newTsBuilderScope.StartCollectingFaceSet();
 
-                     Outer.CreateShape(shapeEditScope, lcs, scaledLcs, guid);
+                     outer.CreateShapeConnectedFaceSet(cache, shapeEditScope, lcs, scaledLcs, guid, false);
 
                      // This needs to be in scope so that we keep the mesh tolerance for vertices.
                      if (newTsBuilderScope.CreatedFacesCount != 0)
                      {
-                        if (newTsBuilderScope.CreatedFacesCount != Outer.Faces.Count)
+                        if (newTsBuilderScope.CreatedFacesCount != faceCount)
                            Importer.TheLog.LogWarning
-                               (Outer.Id, "Processing " + newTsBuilderScope.CreatedFacesCount + " valid faces out of " + Outer.Faces.Count + " total.", false);
+                               (outer.StepId, "Processing " + newTsBuilderScope.CreatedFacesCount + " valid faces out of " + faceCount + " total.", false);
 
                         geomObjs = newTsBuilderScope.CreateGeometry(guid);
                      }
@@ -114,23 +110,14 @@ namespace Revit.IFC.Import.Data
          if (geomObjs == null || geomObjs.Count == 0)
          {
             // Couldn't use fallback, or fallback didn't work.
-            Importer.TheLog.LogWarning(Id, "Couldn't create any geometry.", false);
+            Importer.TheLog.LogWarning(manifoldSolidBrep.StepId, "Couldn't create any geometry.", false);
             return null;
          }
 
          return geomObjs;
       }
 
-      override protected void Process(IFCAnyHandle ifcManifoldSolidBrep)
-      {
-         base.Process(ifcManifoldSolidBrep);
-
-         // We will not fail if the transform is not given, but instead assume it to be the identity.
-         IFCAnyHandle ifcOuter = IFCImportHandleUtil.GetRequiredInstanceAttribute(ifcManifoldSolidBrep, "Outer", true);
-         Outer = IFCClosedShell.ProcessIFCClosedShell(ifcOuter);
-
-
-      }
+      
 
       /// <summary>
       /// Create geometry for a particular representation item.
@@ -139,60 +126,31 @@ namespace Revit.IFC.Import.Data
       /// <param name="lcs">Local coordinate system for the geometry, without scale.</param>
       /// <param name="scaledLcs">Local coordinate system for the geometry, including scale, potentially non-uniform.</param>
       /// <param name="guid">The guid of an element for which represntation is being created.</param>
-      protected override void CreateShapeInternal(IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
+      internal static void CreateShapeManifoldSolidBrep(this IfcManifoldSolidBrep manifoldSolidBrep, CreateElementIfcCache cache, IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
       {
-         base.CreateShapeInternal(shapeEditScope, lcs, scaledLcs, guid);
-
          // Ignoring Inner shells for now.
-         if (Outer != null)
+         IfcConnectedFaceSet outer = manifoldSolidBrep.Outer;
+         if (outer == null)
+            return;
+
+         IList<GeometryObject> geometry = new List<GeometryObject>();
+
+         IfcAdvancedBrep advancedBrep = manifoldSolidBrep as IfcAdvancedBrep;
+         if (advancedBrep != null)
          {
-            try
+            geometry = advancedBrep.CreateGeometryAdvancedBrep(cache, shapeEditScope, lcs, scaledLcs, guid);
+         }
+         else
+         {
+            geometry = manifoldSolidBrep.CreateGeometryManifoldSolidBrep(cache, shapeEditScope, lcs, scaledLcs, guid);
+         }
+         if (geometry != null)
+         {
+            foreach (GeometryObject geom in geometry)
             {
-               IList<GeometryObject> solids = CreateGeometry(shapeEditScope, lcs, scaledLcs, guid);
-               if (solids != null)
-               {
-                  foreach (GeometryObject solid in solids)
-                  {
-                     shapeEditScope.AddGeometry(IFCSolidInfo.Create(Id, solid));
-                  }
-               }
-               else
-                  Importer.TheLog.LogError(Outer.Id, "cannot create valid solid, ignoring.", false);
-            }
-            catch (Exception ex)
-            {
-               Importer.TheLog.LogError(Outer.Id, ex.Message, false);
+               shapeEditScope.Solids.Add(IFCSolidInfo.Create(manifoldSolidBrep.StepId, geom));
             }
          }
-      }
-
-      protected IFCManifoldSolidBrep(IFCAnyHandle item)
-      {
-         Process(item);
-      }
-
-      /// <summary>
-      /// Create an IFCManifoldSolidBrep object from a handle of type IfcManifoldSolidBrep.
-      /// </summary>
-      /// <param name="ifcManifoldSolidBrep">The IFC handle.</param>
-      /// <returns>The IFCManifoldSolidBrep object.</returns>
-      public static IFCManifoldSolidBrep ProcessIFCManifoldSolidBrep(IFCAnyHandle ifcManifoldSolidBrep)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcManifoldSolidBrep))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcManifoldSolidBrep);
-            return null;
-         }
-
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcManifoldSolidBrep, IFCEntityType.IfcFacetedBrep))
-            return IFCFacetedBrep.ProcessIFCFacetedBrep(ifcManifoldSolidBrep);
-         if (IFCImportFile.TheFile.SchemaVersion > IFCSchemaVersion.IFC2x3 && IFCAnyHandleUtil.IsSubTypeOf(ifcManifoldSolidBrep, IFCEntityType.IfcAdvancedBrep))
-            return IFCAdvancedBrep.ProcessIFCAdvancedBrep(ifcManifoldSolidBrep);
-
-         IFCEntity manifoldSolidBrep;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcManifoldSolidBrep.StepId, out manifoldSolidBrep))
-            manifoldSolidBrep = new IFCManifoldSolidBrep(ifcManifoldSolidBrep);
-         return (manifoldSolidBrep as IFCManifoldSolidBrep);
       }
    }
 }

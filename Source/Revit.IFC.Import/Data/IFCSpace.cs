@@ -28,70 +28,36 @@ using Revit.IFC.Common.Utility;
 using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
    /// <summary>
    /// Represents an IfcSpace.
    /// </summary>
-   public class IFCSpace : IFCSpatialStructureElement
+   public static class IFCSpace
    {
       // IFC2x3 has "InteriorOrExteriorSpace"; IFC4 has "PredefinedType".  We will use the IFCObjectDefinition PredefinedType to store this field.
-
-      private double m_ElevationWithFlooring = 0.0;
-
-      public double ElevationWithFlooring
-      {
-         get { return m_ElevationWithFlooring; }
-         set { m_ElevationWithFlooring = value; }
-      }
-
-      /// <summary>
-      /// Constructs an IFCSpace from the IfcSpace handle.
-      /// </summary>
-      /// <param name="ifcSpace">The IfcSpace handle.</param>
-      protected IFCSpace(IFCAnyHandle ifcSpace)
-      {
-         Process(ifcSpace);
-      }
-
-      /// <summary>
-      /// Default constructor.
-      /// </summary>
-      protected IFCSpace()
-      {
-
-      }
 
       /// <summary>
       /// Creates or populates Revit element params based on the information contained in this class.
       /// </summary>
       /// <param name="doc">The document.</param>
       /// <param name="element">The element.</param>
-      protected override void CreateParametersInternal(Document doc, Element element)
+      internal static void CreateParametersInternal(this IfcSpace space, Document doc, Element element)
       {
-         base.CreateParametersInternal(doc, element);
-
          if (element != null)
          {
             // Set "ElevationWithFlooring" parameter.
-            IFCPropertySet.AddParameterDouble(doc, element, "ElevationWithFlooring", UnitType.UT_Length, ElevationWithFlooring, Id);
+            IFCPropertySet.AddParameterDouble(doc, element, "ElevationWithFlooring", UnitType.UT_Length, space.ElevationWithFlooring, space.StepId);
 
-            // Set "PredefinedType" parameter.
-            if (PredefinedType != null)
-            {
-               if (IFCImportFile.TheFile.SchemaVersion < IFCSchemaVersion.IFC4)
-                  IFCPropertySet.AddParameterString(doc, element, "InteriorOrExteriorSpace", PredefinedType, Id);
-               else
-                  IFCPropertySet.AddParameterString(doc, element, "PredefinedType", PredefinedType, Id);
-            }
+            if(space.Database.Release < ReleaseVersion.IFC4)
+               IFCPropertySet.AddParameterString(doc, element, "InteriorOrExteriorSpace", space.PredefinedType.ToString(), space.StepId);
 
             // Set "IfcZone" parameter.
             string zoneNames = null;
-            foreach (IFCGroup zone in AssignmentGroups)
+            foreach (IfcZone zone in space.HasAssignments.OfType<IfcRelAssignsToGroup>().Select(x=>x.RelatingGroup).OfType<IfcZone>())
             {
-               if (!(zone is IFCZone))
-                  continue;
-
                string name = zone.Name;
                if (string.IsNullOrWhiteSpace(name))
                   continue;
@@ -103,64 +69,8 @@ namespace Revit.IFC.Import.Data
             }
 
             if (zoneNames != null)
-               IFCPropertySet.AddParameterString(doc, element, "IfcZone", zoneNames, Id);
+               IFCPropertySet.AddParameterString(doc, element, "IfcZone", zoneNames, space.StepId);
          }
-      }
-
-      /// <summary>
-      /// Gets the predefined type from the IfcSpace, depending on the file version and entity type.
-      /// </summary>
-      /// <param name="ifcSpace">The associated handle.</param>
-      /// <returns>The predefined type, if any.</returns>
-      /// <remarks>Some entities use other fields as predefined type, including IfcDistributionPort ("FlowDirection") and IfcSpace (pre-IFC4).</remarks>
-      protected override string GetPredefinedType(IFCAnyHandle ifcSpace)
-      {
-         string predefinedType = null;
-         try
-         {
-            // We won't bother validating the return values, since we are storing them as a string.
-            if (IFCImportFile.TheFile.SchemaVersion < IFCSchemaVersion.IFC4)
-               predefinedType = IFCAnyHandleUtil.GetEnumerationAttribute(ifcSpace, "InteriorOrExteriorSpace");
-            else
-               predefinedType = IFCAnyHandleUtil.GetEnumerationAttribute(ifcSpace, "PredefinedType");
-         }
-         catch
-         {
-            predefinedType = null;
-         }
-
-         return predefinedType;
-      }
-
-      /// <summary>
-      /// Processes IfcSpace attributes.
-      /// </summary>
-      /// <param name="ifcSpace">The IfcSpace handle.</param>
-      protected override void Process(IFCAnyHandle ifcSpace)
-      {
-         base.Process(ifcSpace);
-
-         ElevationWithFlooring = IFCImportHandleUtil.GetOptionalScaledLengthAttribute(ifcSpace, "ElevationWithFlooring", 0.0);
-      }
-
-      /// <summary>
-      /// Processes IfcSpace handle.
-      /// </summary>
-      /// <param name="ifcSpace">The IfcSpace handle.</param>
-      /// <returns>The IFCSpace object.</returns>
-      public static IFCSpace ProcessIFCSpace(IFCAnyHandle ifcSpace)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcSpace))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcSpace);
-            return null;
-         }
-
-         IFCEntity space;
-         if (IFCImportFile.TheFile.EntityMap.TryGetValue(ifcSpace.StepId, out space))
-            return (space as IFCSpace);
-
-         return new IFCSpace(ifcSpace);
       }
    }
 }

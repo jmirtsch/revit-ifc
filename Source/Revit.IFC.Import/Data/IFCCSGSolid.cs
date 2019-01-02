@@ -28,27 +28,18 @@ using Revit.IFC.Common.Enums;
 using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
-   public class IFCCSGSolid : IFCSolidModel
+   public static class IFCCSGSolid
    {
-      IFCBooleanResult m_TreeRootExpression = null;
-
-      public IFCBooleanResult BooleanResult
-      {
-         get { return m_TreeRootExpression; }
-         protected set { m_TreeRootExpression = value; }
-      }
-
-      protected IFCCSGSolid()
-      {
-      }
-
-      protected override IList<GeometryObject> CreateGeometryInternal(
+      internal static IList<GeometryObject> CreateGeometryCsgSolid(this IfcCsgSolid csgSolid, CreateElementIfcCache cache,
          IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
       {
-         if (BooleanResult != null)
-            return BooleanResult.CreateGeometry(shapeEditScope, lcs, scaledLcs, guid);
+         IfcBooleanResult booleanResult = csgSolid.TreeRootExpression as IfcBooleanResult;
+         if (booleanResult != null)
+            return booleanResult.CreateGeometryBooleanResult(cache, shapeEditScope, lcs, scaledLcs, guid);
          return null;
       }
 
@@ -59,57 +50,19 @@ namespace Revit.IFC.Import.Data
       /// <param name="lcs">Local coordinate system for the geometry, without scale.</param>
       /// <param name="scaledLcs">Local coordinate system for the geometry, including scale, potentially non-uniform.</param>
       /// <param name="guid">The guid of an element for which represntation is being created.</param>
-      protected override void CreateShapeInternal(IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
+      internal static void CreateShapeCsgSolid(this IfcCsgSolid csgSolid, CreateElementIfcCache cache, IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
       {
-         base.CreateShapeInternal(shapeEditScope, lcs, scaledLcs, guid);
-
-         IList<GeometryObject> csgGeometries = CreateGeometryInternal(shapeEditScope, lcs, scaledLcs, guid);
+         IList<GeometryObject> csgGeometries = csgSolid.CreateGeometryCsgSolid(cache, shapeEditScope, lcs, scaledLcs, guid);
          if (csgGeometries != null)
          {
             foreach (GeometryObject csgGeometry in csgGeometries)
             {
-               shapeEditScope.AddGeometry(IFCSolidInfo.Create(Id, csgGeometry));
+               shapeEditScope.Solids.Add(IFCSolidInfo.Create(csgSolid.StepId, csgGeometry));
             }
          }
       }
 
-      override protected void Process(IFCAnyHandle solid)
-      {
-         base.Process(solid);
 
-         IFCAnyHandle treeRootExpression = IFCImportHandleUtil.GetRequiredInstanceAttribute(solid, "TreeRootExpression", false);
-         if (!IFCAnyHandleUtil.IsNullOrHasNoValue(treeRootExpression))
-         {
-            if (IFCAnyHandleUtil.IsSubTypeOf(treeRootExpression, IFCEntityType.IfcBooleanResult))
-               BooleanResult = IFCBooleanResult.ProcessIFCBooleanResult(treeRootExpression);
-            else
-               Importer.TheLog.LogUnhandledSubTypeError(treeRootExpression, "IfcCsgSelect", false);
-         }
-      }
-
-      protected IFCCSGSolid(IFCAnyHandle solid)
-      {
-         Process(solid);
-      }
-
-      /// <summary>
-      /// Create an IFCCSGSolid object from a handle of type IfcCSGSolid.
-      /// </summary>
-      /// <param name="ifcSweptAreaSolid">The IFC handle.</param>
-      /// <returns>The IFCCSGSolid object.</returns>
-      public static IFCCSGSolid ProcessIFCCSGSolid(IFCAnyHandle ifcCSGSolid)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcCSGSolid))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcCsgSolid);
-            return null;
-         }
-
-         IFCEntity csgSolid;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcCSGSolid.StepId, out csgSolid))
-            csgSolid = new IFCCSGSolid(ifcCSGSolid);
-
-         return (csgSolid as IFCCSGSolid);
-      }
+      
    }
 }

@@ -29,73 +29,12 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
-   public class IFCBooleanResult : IFCRepresentationItem, IIFCBooleanOperand
+   public static class IFCBooleanResult 
    {
-      IFCBooleanOperator? m_BooleanOperator = null;
-
-      IIFCBooleanOperand m_FirstOperand;
-
-      IIFCBooleanOperand m_SecondOperand;
-
-      /// <summary>
-      /// The boolean operator.
-      /// </summary>
-      public IFCBooleanOperator? BooleanOperator
-      {
-         get { return m_BooleanOperator; }
-         protected set { m_BooleanOperator = value; }
-      }
-
-      /// <summary>
-      /// The first boolean operand.
-      /// </summary>
-      public IIFCBooleanOperand FirstOperand
-      {
-         get { return m_FirstOperand; }
-         protected set { m_FirstOperand = value; }
-      }
-
-      /// <summary>
-      /// The second boolean operand.
-      /// </summary>
-      public IIFCBooleanOperand SecondOperand
-      {
-         get { return m_SecondOperand; }
-         protected set { m_SecondOperand = value; }
-      }
-
-      protected IFCBooleanResult()
-      {
-      }
-
-      override protected void Process(IFCAnyHandle item)
-      {
-         base.Process(item);
-
-         IFCBooleanOperator? booleanOperator = IFCEnums.GetSafeEnumerationAttribute<IFCBooleanOperator>(item, "Operator");
-         if (booleanOperator.HasValue)
-            BooleanOperator = booleanOperator.Value;
-
-         IFCAnyHandle firstOperand = IFCImportHandleUtil.GetRequiredInstanceAttribute(item, "FirstOperand", true);
-         FirstOperand = IFCBooleanOperand.ProcessIFCBooleanOperand(firstOperand);
-
-         IFCAnyHandle secondOperand = IFCImportHandleUtil.GetRequiredInstanceAttribute(item, "SecondOperand", true);
-
-
-         // We'll allow a solid to be created even if the second operand can't be properly handled.
-         try
-         {
-            SecondOperand = IFCBooleanOperand.ProcessIFCBooleanOperand(secondOperand);
-         }
-         catch (Exception ex)
-         {
-            SecondOperand = null;
-            Importer.TheLog.LogError(secondOperand.StepId, ex.Message, false);
-         }
-      }
-
       /// <summary>
       /// Get the styled item corresponding to the solid inside of an IFCRepresentationItem.
       /// </summary>
@@ -104,7 +43,8 @@ namespace Revit.IFC.Import.Data
       /// <remarks>This function is intended to work on an IFCBooleanResult with an arbitrary number of embedded
       /// clipping operations.  We will take the first StyledItem that corresponds to either an IFCBooleanResult,
       /// or the contained solid.  We explicitly do not want any material associated specifically with the void.</remarks>
-      private IFCStyledItem GetStyledItemFromOperand(IFCRepresentationItem repItem)
+
+      private static IfcStyledItem GetStyledItemFromOperand(IfcRepresentationItem repItem)
       {
          if (repItem == null)
             return null;
@@ -112,11 +52,12 @@ namespace Revit.IFC.Import.Data
          if (repItem.StyledByItem != null)
             return repItem.StyledByItem;
 
-         if (repItem is IFCBooleanResult)
+         IfcBooleanResult booleanResult = repItem as IfcBooleanResult;
+         if (booleanResult != null)
          {
-            IIFCBooleanOperand firstOperand = (repItem as IFCBooleanResult).FirstOperand;
-            if (firstOperand is IFCRepresentationItem)
-               return GetStyledItemFromOperand(firstOperand as IFCRepresentationItem);
+            IfcRepresentationItem firstOperand = booleanResult.FirstOperand as IfcRepresentationItem; 
+            if (firstOperand != null)
+               return GetStyledItemFromOperand(firstOperand);
          }
 
          return null;
@@ -130,10 +71,10 @@ namespace Revit.IFC.Import.Data
       /// <param name="scaledLcs">Local coordinate system for the geometry, including scale, potentially non-uniform.</param>
       /// <param name="guid">The guid of an element for which represntation is being created.</param>
       /// <returns>The created geometry.</returns>
-      public IList<GeometryObject> CreateGeometry(
+      public static IList<GeometryObject> CreateGeometryBooleanResult(this IfcBooleanResult booleanResult, CreateElementIfcCache cache,
             IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
       {
-         IList<GeometryObject> firstSolids = FirstOperand.CreateGeometry(shapeEditScope, lcs, scaledLcs, guid);
+         IList<GeometryObject> firstSolids = booleanResult.FirstOperand.CreateGeometryBooleanOperand(cache, shapeEditScope, lcs, scaledLcs, guid);
 
          if (firstSolids != null)
          {
@@ -141,14 +82,15 @@ namespace Revit.IFC.Import.Data
             {
                if (!(potentialSolid is Solid))
                {
-                  Importer.TheLog.LogError((FirstOperand as IFCRepresentationItem).Id, "Can't perform Boolean operation on a Mesh.", false);
+                  Importer.TheLog.LogError(booleanResult.FirstOperand.StepId, "Can't perform Boolean operation on a Mesh.", false);
                   return firstSolids;
                }
             }
          }
 
          IList<GeometryObject> secondSolids = null;
-         if ((firstSolids != null || BooleanOperator == IFCBooleanOperator.Union) && (SecondOperand != null))
+         IfcBooleanOperand secondOperand = booleanResult.SecondOperand;
+         if ((firstSolids != null || booleanResult.Operator == IfcBooleanOperator.UNION) && (secondOperand != null))
          {
             try
             {
@@ -158,11 +100,11 @@ namespace Revit.IFC.Import.Data
                   // Before we process the second operand, we are going to see if there is a uniform material set for the first operand 
                   // (corresponding to the solid in the Boolean operation).  We will try to suggest the same material for the voids to avoid arbitrary
                   // setting of material information for the cut faces.
-                  IFCStyledItem firstOperandStyledItem = GetStyledItemFromOperand(FirstOperand as IFCRepresentationItem);
+                  IfcStyledItem firstOperandStyledItem = GetStyledItemFromOperand(booleanResult.FirstOperand as IfcRepresentationItem);
                   using (IFCImportShapeEditScope.IFCMaterialStack stack =
-                      new IFCImportShapeEditScope.IFCMaterialStack(shapeEditScope, firstOperandStyledItem, null))
+                      new IFCImportShapeEditScope.IFCMaterialStack(shapeEditScope, cache, firstOperandStyledItem, null))
                   {
-                     secondSolids = SecondOperand.CreateGeometry(shapeEditScope, lcs, scaledLcs, guid);
+                     secondSolids = secondOperand.CreateGeometryBooleanOperand(cache, shapeEditScope, lcs, scaledLcs, guid);
                   }
                }
             }
@@ -170,8 +112,8 @@ namespace Revit.IFC.Import.Data
             {
                // We will allow something to be imported, in the case where the second operand is invalid.
                // If the first (base) operand is invalid, we will still fail the import of this solid.
-               if (SecondOperand is IFCRepresentationItem)
-                  Importer.TheLog.LogError((SecondOperand as IFCRepresentationItem).Id, ex.Message, false);
+               if (secondOperand is IfcRepresentationItem)
+                  Importer.TheLog.LogError(secondOperand.StepId, ex.Message, false);
                else
                   throw ex;
                secondSolids = null;
@@ -181,31 +123,29 @@ namespace Revit.IFC.Import.Data
          IList<GeometryObject> resultSolids = null;
          if (firstSolids == null)
          {
-            if (BooleanOperator == IFCBooleanOperator.Union)
+            if (booleanResult.Operator == IfcBooleanOperator.UNION)
                resultSolids = secondSolids;
          }
-         else if (secondSolids == null || BooleanOperator == null)
+         else if (secondSolids == null)
          {
-            if (BooleanOperator == null)
-               Importer.TheLog.LogError(Id, "Invalid BooleanOperationsType.", false);
             resultSolids = firstSolids;
          }
          else
          {
             BooleanOperationsType booleanOperationsType = BooleanOperationsType.Difference;
-            switch (BooleanOperator)
+            switch (booleanResult.Operator)
             {
-               case IFCBooleanOperator.Difference:
+               case IfcBooleanOperator.DIFFERENCE:
                   booleanOperationsType = BooleanOperationsType.Difference;
                   break;
-               case IFCBooleanOperator.Intersection:
+               case IfcBooleanOperator.INTERSECTION:
                   booleanOperationsType = BooleanOperationsType.Intersect;
                   break;
-               case IFCBooleanOperator.Union:
+               case IfcBooleanOperator.UNION:
                   booleanOperationsType = BooleanOperationsType.Union;
                   break;
                default:
-                  Importer.TheLog.LogError(Id, "Invalid BooleanOperationsType.", true);
+                  Importer.TheLog.LogError(booleanResult.StepId, "Invalid BooleanOperationsType.", true);
                   break;
             }
 
@@ -214,11 +154,11 @@ namespace Revit.IFC.Import.Data
             {
                Solid resultSolid = (firstSolid as Solid);
 
-               int secondId = (SecondOperand == null) ? -1 : (SecondOperand as IFCRepresentationItem).Id;
-               XYZ suggestedShiftDirection = (SecondOperand == null) ? null : SecondOperand.GetSuggestedShiftDirection(lcs);
+               int secondId = (secondOperand == null) ? -1 : secondOperand.StepId;
+               XYZ suggestedShiftDirection = (secondOperand == null) ? null : secondOperand.GetSuggestedShiftDirection(lcs);
                foreach (GeometryObject secondSolid in secondSolids)
                {
-                  resultSolid = IFCGeometryUtil.ExecuteSafeBooleanOperation(Id, secondId, resultSolid, secondSolid as Solid, booleanOperationsType, suggestedShiftDirection);
+                  resultSolid = IFCGeometryUtil.ExecuteSafeBooleanOperation(booleanResult.StepId, secondId, resultSolid, secondSolid as Solid, booleanOperationsType, suggestedShiftDirection);
                   if (resultSolid == null)
                      break;
                }
@@ -232,60 +172,22 @@ namespace Revit.IFC.Import.Data
       }
 
       /// <summary>
-      /// In case of a Boolean operation failure, provide a recommended direction to shift the geometry in for a second attempt.
-      /// </summary>
-      /// <param name="lcs">The local transform for this entity.</param>
-      /// <returns>An XYZ representing a unit direction vector, or null if no direction is suggested.</returns>
-      /// <remarks>If the 2nd attempt fails, a third attempt will be done with a shift in the opposite direction.</remarks>
-      public XYZ GetSuggestedShiftDirection(Transform lcs)
-      {
-         // Sub-classes may have a better guess.
-         return null;
-      }
-
-      /// <summary>
       /// Create geometry for a particular representation item, and add to scope.
       /// </summary>
       /// <param name="shapeEditScope">The geometry creation scope.</param>
       /// <param name="lcs">Local coordinate system for the geometry, without scale.</param>
       /// <param name="scaledLcs">Local coordinate system for the geometry, including scale, potentially non-uniform.</param>
       /// <param name="guid">The guid of an element for which represntation is being created.</param>
-      protected override void CreateShapeInternal(IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
+      public static void CreateShapeBooleanResult(this IfcBooleanResult booleanResult, CreateElementIfcCache cache, IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
       {
-         base.CreateShapeInternal(shapeEditScope, lcs, scaledLcs, guid);
-
-         IList<GeometryObject> resultGeometries = CreateGeometry(shapeEditScope, lcs, scaledLcs, guid);
+         IList<GeometryObject> resultGeometries = booleanResult.CreateGeometryBooleanResult(cache, shapeEditScope, lcs, scaledLcs, guid);
          if (resultGeometries != null)
          {
             foreach (GeometryObject resultGeometry in resultGeometries)
             {
-               shapeEditScope.AddGeometry(IFCSolidInfo.Create(Id, resultGeometry));
+               shapeEditScope.Solids.Add(IFCSolidInfo.Create(booleanResult.StepId, resultGeometry));
             }
          }
-      }
-
-      protected IFCBooleanResult(IFCAnyHandle item)
-      {
-         Process(item);
-      }
-
-      /// <summary>
-      /// Create an IFCBooleanResult object from a handle of type IfcBooleanResult.
-      /// </summary>
-      /// <param name="ifcBooleanResult">The IFC handle.</param>
-      /// <returns>The IFCBooleanResult object.</returns>
-      public static IFCBooleanResult ProcessIFCBooleanResult(IFCAnyHandle ifcBooleanResult)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcBooleanResult))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcBooleanResult);
-            return null;
-         }
-
-         IFCEntity booleanResult;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcBooleanResult.StepId, out booleanResult))
-            booleanResult = new IFCBooleanResult(ifcBooleanResult);
-         return (booleanResult as IFCBooleanResult);
       }
    }
 }

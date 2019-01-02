@@ -29,58 +29,12 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
-   public class IFCCartesianTransformOperator : IFCRepresentationItem
+   public static class IFCCartesianTransformOperator
    {
-      Transform m_BaseTransform = Transform.Identity;
-
-      double m_Scale = 1.0;
-
-      double? m_ScaleY = null;
-
-      double? m_ScaleZ = null;
-
-      /// <summary>
-      /// The transform associated with the IfcCartesianTransformOperator
-      /// </summary>
-      public Transform Transform
-      {
-         get { return m_BaseTransform; }
-         protected set { m_BaseTransform = value; }
-      }
-
-      /// <summary>
-      /// The base scale for all dimensions, if ScaleY and ScaleZ are not set; otherwise scale in X direction.
-      /// </summary>
-      public double Scale
-      {
-         get { return m_Scale; }
-         protected set { m_Scale = value; }
-      }
-
-      /// <summary>
-      /// The optional base scale for Y direction.
-      /// </summary>
-      public double? ScaleY
-      {
-         get { return m_ScaleY; }
-         protected set { m_ScaleY = value; }
-      }
-
-      /// <summary>
-      /// The optional base scale for Z direction.
-      /// </summary>
-      public double? ScaleZ
-      {
-         get { return m_ScaleZ; }
-         protected set { m_ScaleZ = value; }
-      }
-
-      protected IFCCartesianTransformOperator()
-      {
-      }
-
       /// <summary>
       /// Calculate the X axis of a transform from the Z axis and an optional X direction, according to the IFC2x3 schema definition.
       /// </summary>
@@ -88,7 +42,7 @@ namespace Revit.IFC.Import.Data
       /// <param name="originalXAxis">The optional X axis from the IFC file, used as a guide.</param>
       /// <param name="id">The id of the IfcCartesianTransformOperator entity, used for error reporting.</param>
       /// <returns>A normalized vector orthogonal to the input zAxis.</returns>
-      private XYZ CalculateXAxisFromZAxis(XYZ zAxis, XYZ originalXAxis, int id)
+      private static XYZ CalculateXAxisFromZAxis(XYZ zAxis, XYZ originalXAxis, int id)
       {
          // Assumes that zAxis exists and is normalized.
          if (zAxis == null)
@@ -137,7 +91,7 @@ namespace Revit.IFC.Import.Data
       /// <returns>The transform.</returns>
       /// <remarks>This is an adaption of the IfcBaseAxis function in the IFC2x3_TC1.exp file that defines
       /// how the basis vectors should be calculated for IfcCartesianTransformOperator.</remarks>
-      private Transform CreateTransformUsingIfcBaseAxisCalculation(XYZ axis1, XYZ axis2, XYZ axis3, XYZ orig, int dim, int id)
+      private static Transform CreateTransformUsingIfcBaseAxisCalculation(XYZ axis1, XYZ axis2, XYZ axis3, XYZ orig, int dim, int id)
       {
          XYZ xAxis = null;
          XYZ yAxis = null;
@@ -236,85 +190,55 @@ namespace Revit.IFC.Import.Data
          return transform;
       }
 
-      override protected void Process(IFCAnyHandle item)
+      internal static Transform GetTransform(this IfcCartesianTransformationOperator cartesianTransformationOperator)
       {
-         base.Process(item);
-
-         IFCAnyHandle localOrigin = IFCImportHandleUtil.GetRequiredInstanceAttribute(item, "LocalOrigin", false);
+         IfcCartesianPoint localOrigin = cartesianTransformationOperator.LocalOrigin;
          XYZ origin = null;
          if (localOrigin != null)
             origin = IFCPoint.ProcessScaledLengthIFCCartesianPoint(localOrigin);
          else
             origin = XYZ.Zero;
 
-         IFCAnyHandle axis1 = IFCImportHandleUtil.GetOptionalInstanceAttribute(item, "Axis1");
+         IfcDirection axis1 = cartesianTransformationOperator.Axis1;
          XYZ xAxis = null;
          if (axis1 != null)
             xAxis = IFCPoint.ProcessNormalizedIFCDirection(axis1);
 
-         IFCAnyHandle axis2 = IFCImportHandleUtil.GetOptionalInstanceAttribute(item, "Axis2");
+         IfcDirection axis2 = cartesianTransformationOperator.Axis2;
          XYZ yAxis = null;
          if (axis2 != null)
             yAxis = IFCPoint.ProcessNormalizedIFCDirection(axis2);
 
-         Scale = IFCImportHandleUtil.GetOptionalRealAttribute(item, "Scale", 1.0);
+         double scale = cartesianTransformationOperator.Scale, scaleY = 1, scaleZ = 1;
 
          XYZ zAxis = null;
 
          // Assume that the dimensionality of the IfcCartesianTransformationOperator is 2, unless determined otherwise below.
          int dim = 2;
 
-         if (IFCAnyHandleUtil.IsSubTypeOf(item, IFCEntityType.IfcCartesianTransformationOperator2DnonUniform))
-            ScaleY = IFCImportHandleUtil.GetOptionalRealAttribute(item, "Scale2", Scale);
-         else if (IFCAnyHandleUtil.IsSubTypeOf(item, IFCEntityType.IfcCartesianTransformationOperator3D))
+         IfcCartesianTransformationOperator2DnonUniform cartesianTransformationOperator2DnonUniform = cartesianTransformationOperator as IfcCartesianTransformationOperator2DnonUniform;
+         if(cartesianTransformationOperator2DnonUniform != null)
+            scaleY = cartesianTransformationOperator2DnonUniform.Scale2;
+         else
          {
-            dim = 3;
-
-            IFCAnyHandle axis3 = IFCImportHandleUtil.GetOptionalInstanceAttribute(item, "Axis3");
-            if (axis3 != null)
-               zAxis = IFCPoint.ProcessNormalizedIFCDirection(axis3);
-            if (IFCAnyHandleUtil.IsSubTypeOf(item, IFCEntityType.IfcCartesianTransformationOperator3DnonUniform))
+            IfcCartesianTransformationOperator3D cartesianTransformationOperator3D = cartesianTransformationOperator as IfcCartesianTransformationOperator3D;
+            if (cartesianTransformationOperator3D != null)
             {
-               ScaleY = IFCImportHandleUtil.GetOptionalRealAttribute(item, "Scale2", Scale);
-               ScaleZ = IFCImportHandleUtil.GetOptionalRealAttribute(item, "Scale3", Scale);
+               dim = 3;
+               IfcDirection axis3 = cartesianTransformationOperator3D.Axis3;
+               if (axis3 != null)
+                  zAxis = IFCPoint.ProcessNormalizedIFCDirection(axis3);
+               IfcCartesianTransformationOperator3DnonUniform cartesianTransformationOperator3DnonUniform = cartesianTransformationOperator3D as IfcCartesianTransformationOperator3DnonUniform;
+               if (cartesianTransformationOperator3DnonUniform != null)
+               {
+                  scaleY = cartesianTransformationOperator3DnonUniform.Scale2;
+                  scaleZ = cartesianTransformationOperator3DnonUniform.Scale3;
+               }
             }
          }
 
          // Set the axes based on what is specified.
-         Transform = CreateTransformUsingIfcBaseAxisCalculation(xAxis, yAxis, zAxis, origin, dim, Id);
-      }
-
-      protected IFCCartesianTransformOperator(IFCAnyHandle item)
-      {
-         Process(item);
-      }
-
-      /// <summary>
-      /// Allows creation of "identity" IFCCartesianTransformOperator if no value provided.
-      /// </summary>
-      /// <returns>The IFCCartesianTransformOperator.</returns>
-      public static IFCCartesianTransformOperator ProcessIFCCartesianTransformOperator()
-      {
-         return new IFCCartesianTransformOperator();
-      }
-
-      /// <summary>
-      /// Creates an IFCCartesianTransformOperator corresponding to an IFC handle.
-      /// </summary>
-      /// <param name="item">The handle.</param>
-      /// <returns>The IFCCartesianTransformOperator.</returns>
-      public static IFCCartesianTransformOperator ProcessIFCCartesianTransformOperator(IFCAnyHandle ifcTransformOperator)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcTransformOperator))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcCartesianTransformationOperator);
-            return null;
-         }
-
-         IFCEntity transformOperator;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcTransformOperator.StepId, out transformOperator))
-            transformOperator = new IFCCartesianTransformOperator(ifcTransformOperator);
-         return (transformOperator as IFCCartesianTransformOperator);
+         return CreateTransformUsingIfcBaseAxisCalculation(xAxis, yAxis, zAxis, origin, dim, cartesianTransformationOperator.StepId);
       }
    }
 }

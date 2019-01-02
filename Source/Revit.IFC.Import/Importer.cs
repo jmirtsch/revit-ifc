@@ -480,28 +480,28 @@ namespace Revit.IFC.Import
 
          if (!useCachedRevitFile)
          {
+            m_ImportLog.LogWarning(0, "Starting Ifc Parsing " + DateTime.Now.ToLongTimeString(), false);
             m_ImportCache = IFCImportCache.Create(ifcDocument, localFileName);
 
             // Limit creating the cache to Link, but may either remove limiting or make it more restrict (reload only) later.
             if (TheOptions.Action == IFCImportAction.Link)
                TheCache.CreateExistingElementMaps(ifcDocument);
 
+            m_ImportLog.LogWarning(0, "Starting Ifc Processing " + DateTime.Now.ToLongTimeString(), false);
             // TheFile will contain the same value as the return value for this function.
             IFCImportFile.Create(localFileName, m_ImportOptions, ifcDocument);
          }
 
          if (useCachedRevitFile || IFCImportFile.TheFile != null)
          {
+            m_ImportLog.LogWarning(0, "Starting Ifc Project Import " + DateTime.Now.ToLongTimeString(), false);
             IFCImportFile theFile = IFCImportFile.TheFile;
-            if (theFile != null)
+            if (theFile != null && theFile.DatabaseIfc.Project != null)
             {
-               if (theFile.IFCProject != null)
-                  IFCObjectDefinition.CreateElement(ifcDocument, theFile.IFCProject);
+               ProjectAggregate projectAggregate = new ProjectAggregate(theFile.DatabaseIfc.Project, ifcDocument);
+               projectAggregate.AddElements();
 
-               // Also process any other entities to create.
-               foreach (IFCObjectDefinition objDef in IFCImportFile.TheFile.OtherEntitiesToCreate)
-                  IFCObjectDefinition.CreateElement(ifcDocument, objDef);
-
+               m_ImportLog.LogWarning(0, "Finished Ifc Project Import " + DateTime.Now.ToLongTimeString(), false);
                theFile.EndImport(ifcDocument, localFileName);
             }
 

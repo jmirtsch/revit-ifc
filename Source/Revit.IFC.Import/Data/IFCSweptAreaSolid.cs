@@ -29,55 +29,13 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
-   public abstract class IFCSweptAreaSolid : IFCSolidModel
+   public static class IFCSweptAreaSolid 
    {
-      IFCProfileDef m_SweptArea = null;
-
-      Transform m_Position = null;
-
-      /// <summary>
-      /// The swept area profile of the IfcSweptAreaSolid.
-      /// </summary>
-      public IFCProfileDef SweptArea
-      {
-         get { return m_SweptArea; }
-         protected set { m_SweptArea = value; }
-      }
-
-      /// <summary>
-      /// The local coordinate system of the IfcSweptAreaSolid.
-      /// </summary>
-      public Transform Position
-      {
-         get { return m_Position; }
-         protected set { m_Position = value; }
-      }
-
-      protected IFCSweptAreaSolid()
-      {
-      }
-
-      override protected void Process(IFCAnyHandle solid)
-      {
-         base.Process(solid);
-
-         IFCAnyHandle sweptArea = IFCImportHandleUtil.GetRequiredInstanceAttribute(solid, "SweptArea", true);
-         SweptArea = IFCProfileDef.ProcessIFCProfileDef(sweptArea);
-
-         IFCAnyHandle location = IFCImportHandleUtil.GetRequiredInstanceAttribute(solid, "Position", false);
-         if (location != null)
-            Position = IFCLocation.ProcessIFCAxis2Placement(location);
-         else
-            Position = Transform.Identity;
-      }
-
-      protected IFCSweptAreaSolid(IFCAnyHandle solid)
-      {
-      }
-
-      private IList<CurveLoop> GetTransformedCurveLoopsFromSimpleProfile(IFCSimpleProfile simpleSweptArea, Transform unscaledLcs, Transform scaledLcs)
+      private static IList<CurveLoop> GetTransformedCurveLoopsFromSimpleProfile(this IfcSweptAreaSolid sweptAreaSolid, IFCSimpleProfile simpleSweptArea, Transform unscaledLcs, Transform scaledLcs)
       {
          IList<CurveLoop> loops = new List<CurveLoop>();
 
@@ -91,60 +49,64 @@ namespace Revit.IFC.Import.Data
          CurveLoop currLoop = simpleSweptArea.OuterCurve;
          if (currLoop == null || currLoop.Count() == 0)
          {
-            Importer.TheLog.LogError(simpleSweptArea.Id, "No outer curve loop for profile, ignoring.", false);
+            Importer.TheLog.LogError(sweptAreaSolid.StepId, "No outer curve loop for profile, ignoring.", false);
             return null;
          }
-         loops.Add(IFCGeometryUtil.CreateTransformed(currLoop, Id, unscaledSweptAreaPosition, scaledSweptAreaPosition));
+         loops.Add(IFCGeometryUtil.CreateTransformed(currLoop, sweptAreaSolid.StepId, unscaledSweptAreaPosition, scaledSweptAreaPosition));
 
          if (simpleSweptArea.InnerCurves != null)
          {
             foreach (CurveLoop innerCurveLoop in simpleSweptArea.InnerCurves)
-               loops.Add(IFCGeometryUtil.CreateTransformed(innerCurveLoop, Id, unscaledSweptAreaPosition, scaledSweptAreaPosition));
+               loops.Add(IFCGeometryUtil.CreateTransformed(innerCurveLoop, sweptAreaSolid.StepId, unscaledSweptAreaPosition, scaledSweptAreaPosition));
          }
 
          return loops;
       }
 
-      private void GetTransformedCurveLoopsFromProfile(IFCProfileDef profile, Transform unscaledLcs, Transform scaledLcs, ISet<IList<CurveLoop>> loops)
+      private static void GetTransformedCurveLoopsFromProfile(this IfcSweptAreaSolid sweptAreaSolid, IfcProfileDef profile, Transform unscaledLcs, Transform scaledLcs, ISet<IList<CurveLoop>> loops, CreateElementIfcCache cache)
       {
-         if (profile is IFCSimpleProfile)
+         IFCSimpleProfile simpleProfile = IFCSimpleProfile.CreateIFCSimpleProfile(profile, cache);
+         if (simpleProfile != null)
          {
-            IFCSimpleProfile simpleSweptArea = profile as IFCSimpleProfile;
-
-            IList<CurveLoop> currLoops = GetTransformedCurveLoopsFromSimpleProfile(simpleSweptArea, unscaledLcs, scaledLcs);
+            IList<CurveLoop> currLoops = GetTransformedCurveLoopsFromSimpleProfile(sweptAreaSolid, simpleProfile, unscaledLcs, scaledLcs);
             if (currLoops != null && currLoops.Count > 0)
                loops.Add(currLoops);
          }
-         else if (profile is IFCCompositeProfile)
-         {
-            IFCCompositeProfile compositeSweptArea = profile as IFCCompositeProfile;
-
-            foreach (IFCProfileDef subProfile in compositeSweptArea.Profiles)
-               GetTransformedCurveLoopsFromProfile(subProfile, unscaledLcs, scaledLcs, loops);
-         }
-         else if (profile is IFCDerivedProfileDef)
-         {
-            IFCDerivedProfileDef derivedProfileDef = profile as IFCDerivedProfileDef;
-
-            Transform fullUnscaledLCS = unscaledLcs;
-            Transform localLCS = derivedProfileDef.Operator.Transform;
-            if (fullUnscaledLCS == null)
-               fullUnscaledLCS = localLCS;
-            else if (localLCS != null)
-               fullUnscaledLCS = fullUnscaledLCS.Multiply(localLCS);
-
-            Transform fullScaledLCS = scaledLcs;
-            if (fullScaledLCS == null)
-               fullScaledLCS = localLCS;
-            else if (localLCS != null)
-               fullScaledLCS = fullScaledLCS.Multiply(localLCS);
-
-            GetTransformedCurveLoopsFromProfile(derivedProfileDef.ParentProfile, fullUnscaledLCS, fullScaledLCS, loops);
-         }
          else
          {
-            // TODO: Support.
-            Importer.TheLog.LogError(Id, "SweptArea Profile #" + profile.Id + " not yet supported.", false);
+            IfcCompositeProfileDef compositeProfileDef = profile as IfcCompositeProfileDef;
+            if (compositeProfileDef != null)
+            {
+               foreach (IfcProfileDef subProfile in compositeProfileDef.Profiles)
+                  GetTransformedCurveLoopsFromProfile(sweptAreaSolid, subProfile, unscaledLcs, scaledLcs, loops, cache);
+            }
+            else
+            {
+               IfcDerivedProfileDef derivedProfileDef = profile as IfcDerivedProfileDef;
+               if (derivedProfileDef != null)
+               {
+
+                  Transform fullUnscaledLCS = unscaledLcs;
+                  Transform localLCS = derivedProfileDef.Operator.GetTransform();
+                  if (fullUnscaledLCS == null)
+                     fullUnscaledLCS = localLCS;
+                  else if (localLCS != null)
+                     fullUnscaledLCS = fullUnscaledLCS.Multiply(localLCS);
+
+                  Transform fullScaledLCS = scaledLcs;
+                  if (fullScaledLCS == null)
+                     fullScaledLCS = localLCS;
+                  else if (localLCS != null)
+                     fullScaledLCS = fullScaledLCS.Multiply(localLCS);
+
+                  GetTransformedCurveLoopsFromProfile(sweptAreaSolid, derivedProfileDef.ContainerProfile, fullUnscaledLCS, fullScaledLCS, loops, cache);
+               }
+               else
+               {
+                  // TODO: Support.
+                  Importer.TheLog.LogError(sweptAreaSolid.StepId, "SweptArea Profile #" + profile.StepId + " not yet supported.", false);
+               }
+            }
          }
       }
 
@@ -155,35 +117,11 @@ namespace Revit.IFC.Import.Data
       /// <param name="lcs">The scaled (true) transform.</param>
       /// <returns>The set of list of curveloops representing logically disjoint profiles of exactly one outer and zero of more inner loops.</returns>
       /// <remarks>We state "logically disjoint" because the code does not check the validity of the loops at this time.</remarks>
-      protected ISet<IList<CurveLoop>> GetTransformedCurveLoops(Transform lcs, Transform scaledLCS)
+      internal static ISet<IList<CurveLoop>> GetTransformedCurveLoops(this IfcSweptAreaSolid sweptAreaSolid, Transform lcs, Transform scaledLCS, CreateElementIfcCache cache)
       {
          ISet<IList<CurveLoop>> loops = new HashSet<IList<CurveLoop>>();
-         GetTransformedCurveLoopsFromProfile(SweptArea, lcs, scaledLCS, loops);
+         GetTransformedCurveLoopsFromProfile(sweptAreaSolid, sweptAreaSolid.SweptArea, lcs, scaledLCS, loops, cache);
          return loops;
-      }
-
-      /// <summary>
-      /// Create an IFCSolidModel object from a handle of type IfcSweptAreaSolid.
-      /// </summary>
-      /// <param name="ifcSweptAreaSolid">The IFC handle.</param>
-      /// <returns>The IFCSweptAreaSolid object.</returns>
-      public static IFCSweptAreaSolid ProcessIFCSweptAreaSolid(IFCAnyHandle ifcSweptAreaSolid)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcSweptAreaSolid))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcSweptAreaSolid);
-            return null;
-         }
-
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcSweptAreaSolid, IFCEntityType.IfcExtrudedAreaSolid))
-            return IFCExtrudedAreaSolid.ProcessIFCExtrudedAreaSolid(ifcSweptAreaSolid);
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcSweptAreaSolid, IFCEntityType.IfcRevolvedAreaSolid))
-            return IFCRevolvedAreaSolid.ProcessIFCRevolvedAreaSolid(ifcSweptAreaSolid);
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcSweptAreaSolid, IFCEntityType.IfcSurfaceCurveSweptAreaSolid))
-            return IFCSurfaceCurveSweptAreaSolid.ProcessIFCSurfaceCurveSweptAreaSolid(ifcSweptAreaSolid);
-
-         Importer.TheLog.LogUnhandledSubTypeError(ifcSweptAreaSolid, IFCEntityType.IfcSweptAreaSolid, true);
-         return null;
       }
    }
 }

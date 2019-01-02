@@ -28,32 +28,33 @@ using Revit.IFC.Common.Utility;
 using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
    /// <summary>
    /// Represents an IfcPropertyBoundedValue
    /// </summary>
-   public class IFCPropertyBoundedValue : IFCSimpleProperty
+   public static class IFCPropertyBoundedValue
    {
-      private int m_LowerBoundPropertyIndex = -1;
-
-      private int m_UpperBoundPropertyIndex = -1;
-
-      private int m_SetPointValueIndex = -1;
-
-      private string FormatBoundedValue(IFCPropertyValue propertyValue)
+      private static string FormatBoundedValue(this IfcPropertyBoundedValue propertyBoundedValue, IfcValue propertyValue)
       {
-         if (IFCUnit != null)
-            return UnitFormatUtils.Format(IFCImportFile.TheFile.Document.GetUnits(), IFCUnit.UnitType, propertyValue.AsDouble(), true, false);
+
+         IfcUnit ifcUnit = propertyBoundedValue.Unit;
+         if (ifcUnit != null)
+         {
+            IFCUnit unit = new IFCUnit(ifcUnit);
+            return UnitFormatUtils.Format(IFCImportFile.TheFile.Document.GetUnits(), unit.UnitType, Convert.ToDouble(propertyValue.Value), true, false);
+         }
          else
-            return propertyValue.ValueAsString();
+            return propertyValue.ValueString;
       }
 
       /// <summary>
       /// Returns the property value as a string, for SetValueString().
       /// </summary>
       /// <returns>The property value as a string.</returns>
-      public override string PropertyValueAsString()
+      public static string PropertyValueAsString(this IfcPropertyBoundedValue propertyBoundedValue)
       {
          // Format as one of the following:
          // None: empty string
@@ -66,101 +67,39 @@ namespace Revit.IFC.Import.Data
          // Lower, Upper, SetPointValue: [ LowValue - UpperValue ] (SetPointValue)
          string propertyValueAsString = string.Empty;
 
-         bool hasLowerBoundPropertyIndex = (m_LowerBoundPropertyIndex >= 0);
-         bool hasUpperBoundPropertyIndex = (m_UpperBoundPropertyIndex >= 0);
-
-         if (hasLowerBoundPropertyIndex)
+         IfcValue lowerValue = propertyBoundedValue.LowerBoundValue;
+         IfcValue upperValue = propertyBoundedValue.UpperBoundValue;
+         IfcValue setValue = propertyBoundedValue.SetPointValue;
+         
+         if (lowerValue != null)
          {
-            if (!hasUpperBoundPropertyIndex)
+            if (upperValue == null)
                propertyValueAsString += ">= ";
             else
                propertyValueAsString += "[ ";
 
-            propertyValueAsString += FormatBoundedValue(IFCPropertyValues[m_LowerBoundPropertyIndex]);
+            propertyValueAsString += FormatBoundedValue(propertyBoundedValue, lowerValue);
          }
 
-         if (hasUpperBoundPropertyIndex)
+         if (upperValue != null)
          {
-            if (!hasLowerBoundPropertyIndex)
+            if (lowerValue == null)
                propertyValueAsString += "<= ";
             else
                propertyValueAsString += " - ";
-            propertyValueAsString += FormatBoundedValue(IFCPropertyValues[m_UpperBoundPropertyIndex]);
-            if (hasLowerBoundPropertyIndex)
+            propertyValueAsString += FormatBoundedValue(propertyBoundedValue, upperValue);
+            if (lowerValue != null)
                propertyValueAsString += " ]";
          }
 
-         if (m_SetPointValueIndex >= 0)
+         if (setValue != null)
          {
-            if (hasUpperBoundPropertyIndex || hasLowerBoundPropertyIndex)
+            if (upperValue != null || lowerValue != null)
                propertyValueAsString += " ";
-            propertyValueAsString += "(" + FormatBoundedValue(IFCPropertyValues[m_SetPointValueIndex]) + ")";
+            propertyValueAsString += "(" + FormatBoundedValue(propertyBoundedValue, setValue) + ")";
          }
 
          return propertyValueAsString;
-      }
-
-      protected IFCPropertyBoundedValue()
-      {
-      }
-
-      protected IFCPropertyBoundedValue(IFCAnyHandle ifcPropertyBoundedValue)
-      {
-         Process(ifcPropertyBoundedValue);
-      }
-
-      /// <summary>
-      /// Processes an IFC bounded value property.
-      /// </summary>
-      /// <param name="ifcPropertyBoundedValue">The IfcPropertyBoundedValue object.</param>
-      /// <returns>The IFCPropertyBoundedValue object.</returns>
-      override protected void Process(IFCAnyHandle ifcPropertyBoundedValue)
-      {
-         base.Process(ifcPropertyBoundedValue);
-
-         IFCData lowerBoundValue = ifcPropertyBoundedValue.GetAttribute("LowerBoundValue");
-         IFCData upperBoundValue = ifcPropertyBoundedValue.GetAttribute("UpperBoundValue");
-         IFCData setPointValue = (IFCImportFile.TheFile.SchemaVersion > IFCSchemaVersion.IFC2x3) ? ifcPropertyBoundedValue.GetAttribute("SetPointValue") : null;
-
-         if (lowerBoundValue != null)
-         {
-            m_LowerBoundPropertyIndex = IFCPropertyValues.Count;
-            IFCPropertyValues.Add(new IFCPropertyValue(this, lowerBoundValue));
-         }
-
-         if (upperBoundValue != null)
-         {
-            m_UpperBoundPropertyIndex = IFCPropertyValues.Count;
-            IFCPropertyValues.Add(new IFCPropertyValue(this, upperBoundValue));
-         }
-
-         if (setPointValue != null)
-         {
-            m_SetPointValueIndex = IFCPropertyValues.Count;
-            IFCPropertyValues.Add(new IFCPropertyValue(this, setPointValue));
-         }
-
-         ProcessIFCSimplePropertyUnit(this, ifcPropertyBoundedValue);
-      }
-
-      /// <summary>
-      /// Processes an IFC bounded value property.
-      /// </summary>
-      /// <param name="ifcPropertyBoundedValue">The IfcPropertyBoundedValue handle.</param>
-      /// <returns>The IFCPropertyBoundedValue object.</returns>
-      public static IFCPropertyBoundedValue ProcessIFCPropertyBoundedValue(IFCAnyHandle ifcPropertyBoundedValue)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcPropertyBoundedValue))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcPropertyBoundedValue);
-            return null;
-         }
-
-         IFCEntity propertyBoundedValue;
-         if (IFCImportFile.TheFile.EntityMap.TryGetValue(ifcPropertyBoundedValue.StepId, out propertyBoundedValue))
-            return (propertyBoundedValue as IFCPropertyBoundedValue);
-
-         return new IFCPropertyBoundedValue(ifcPropertyBoundedValue);
       }
    }
 }

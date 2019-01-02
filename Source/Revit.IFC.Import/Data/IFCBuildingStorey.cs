@@ -29,17 +29,12 @@ using Revit.IFC.Common.Utility;
 using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
-   /// <summary>
-   /// Represents an IfcBuildingStorey.
-   /// </summary>
-   public class IFCBuildingStorey : IFCSpatialStructureElement
+   public static class IFCBuildingStorey
    {
-      double m_Elevation;
-
-      ElementId m_CreatedViewId = ElementId.InvalidElementId;
-
       static ElementId m_ViewPlanTypeId = ElementId.InvalidElementId;
 
       static ElementId m_ExistingLevelIdToReuse = ElementId.InvalidElementId;
@@ -48,15 +43,6 @@ namespace Revit.IFC.Import.Data
       /// Returns true if we have tried to set m_ViewPlanTypeId.  m_ViewPlanTypeId may or may not have a valid value.
       /// </summary>
       static bool m_ViewPlanTypeIdInitialized = false;
-
-      /// <summary>
-      /// Returns the associated Plan View for the level.
-      /// </summary>
-      public ElementId CreatedViewId
-      {
-         get { return m_CreatedViewId; }
-         protected set { m_CreatedViewId = value; }
-      }
 
       /// <summary>
       /// If the ActiveView is level-based, we can't delete it.  Instead, use it for the first level "created".
@@ -95,39 +81,15 @@ namespace Revit.IFC.Import.Data
       }
 
       /// <summary>
-      /// Constructs an IFCBuildingStorey from the IfcBuildingStorey handle.
-      /// </summary>
-      /// <param name="ifcIFCBuildingStorey">The IfcBuildingStorey handle.</param>
-      protected IFCBuildingStorey(IFCAnyHandle ifcIFCBuildingStorey)
-      {
-         Process(ifcIFCBuildingStorey);
-      }
-
-      /// <summary>
-      /// Creates or populates Revit element params based on the information contained in this class.
-      /// </summary>
-      /// <param name="doc"></param>
-      /// <param name="element"></param>
-      protected override void CreateParametersInternal(Document doc, Element element)
-      {
-         base.CreateParametersInternal(doc, element);
-
-         if (element != null)
-         {
-            // Set "IfcElevation" parameter.
-            IFCPropertySet.AddParameterDouble(doc, element, "IfcElevation", UnitType.UT_Length, m_Elevation, Id);
-         }
-      }
-
-      /// <summary>
       /// Creates or populates Revit elements based on the information contained in this class.
       /// </summary>
       /// <param name="doc">The document.</param>
-      protected override void Create(Document doc)
+      internal static void Create(this IfcBuildingStorey buildingStorey, CreateElementIfcCache cache)
       {
+         Document doc = cache.Document;
          // We may re-use the ActiveView Level and View, since we can't delete them.
          // We will consider that we "created" this level and view for creation metrics.
-         Level level = Importer.TheCache.UseElementByGUID<Level>(doc, GlobalId);
+         Level level = Importer.TheCache.UseElementByGUID<Level>(doc, buildingStorey.GlobalId);
 
          bool reusedLevel = false;
          bool foundLevel = false;
@@ -146,92 +108,41 @@ namespace Revit.IFC.Import.Data
             foundLevel = true;
 
          if (level == null)
-            level = Level.Create(doc, m_Elevation);
+            level = Level.Create(doc, IFCUnitUtil.ScaleLength(buildingStorey.Elevation));
          else
-            level.Elevation = m_Elevation;
+            level.Elevation = IFCUnitUtil.ScaleLength(buildingStorey.Elevation);
 
          if (level != null)
-            CreatedElementId = level.Id;
+            cache.CreatedElements[buildingStorey.StepId] = level.Id;
 
-         if (CreatedElementId != ElementId.InvalidElementId)
+         if (level != null && level.Id != ElementId.InvalidElementId)
          {
             if (!foundLevel)
             {
                if (!reusedLevel)
                {
+                  ViewPlan viewPlan = null;
                   ElementId viewPlanTypeId = IFCBuildingStorey.GetViewPlanTypeId(doc);
                   if (viewPlanTypeId != ElementId.InvalidElementId)
                   {
-                     ViewPlan viewPlan = ViewPlan.Create(doc, viewPlanTypeId, CreatedElementId);
+                     viewPlan = ViewPlan.Create(doc, viewPlanTypeId, level.Id);
                      if (viewPlan != null)
-                        CreatedViewId = viewPlan.Id;
+                        cache.CreatedViews[buildingStorey.StepId] = viewPlan.Id;
                   }
 
-                  if (CreatedViewId == ElementId.InvalidElementId)
-                     Importer.TheLog.LogAssociatedCreationError(this, typeof(ViewPlan));
+                  if (viewPlan == null)
+                     Importer.TheLog.LogAssociatedCreationError(buildingStorey, typeof(ViewPlan));
                }
                else
                {
                   if (doc.ActiveView != null)
-                     CreatedViewId = doc.ActiveView.Id;
+                     cache.CreatedViews[buildingStorey.StepId] = doc.ActiveView.Id;
                }
             }
          }
          else
-            Importer.TheLog.LogCreationError(this, null, false);
+            Importer.TheLog.LogCreationError(buildingStorey, null, false);
 
-         TraverseSubElements(doc);
-      }
-
-      /// <summary>
-      /// Get the element ids created for this entity, for summary logging.
-      /// </summary>
-      /// <param name="createdElementIds">The creation list.</param>
-      /// <remarks>May contain InvalidElementId; the caller is expected to remove it.</remarks>
-      public override void GetCreatedElementIds(ISet<ElementId> createdElementIds)
-      {
-         base.GetCreatedElementIds(createdElementIds);
-         if (CreatedViewId != ElementId.InvalidElementId)
-            createdElementIds.Add(CreatedViewId);
-      }
-
-      /// <summary>
-      /// Processes IfcBuildingStorey attributes.
-      /// </summary>
-      /// <param name="ifcIFCBuildingStorey">The IfcBuildingStorey handle.</param>
-      protected override void Process(IFCAnyHandle ifcIFCBuildingStorey)
-      {
-         base.Process(ifcIFCBuildingStorey);
-
-         Elevation = IFCImportHandleUtil.GetOptionalScaledLengthAttribute(ifcIFCBuildingStorey, "Elevation", 0.0);
-      }
-
-      /// <summary>
-      /// The elevation.
-      /// </summary>
-      public double Elevation
-      {
-         get { return m_Elevation; }
-         protected set { m_Elevation = value; }
-      }
-
-      /// <summary>
-      /// Processes an IfcBuildingStorey object.
-      /// </summary>
-      /// <param name="ifcBuildingStorey">The IfcBuildingStorey handle.</param>
-      /// <returns>The IFCBuildingStorey object.</returns>
-      public static IFCBuildingStorey ProcessIFCBuildingStorey(IFCAnyHandle ifcBuildingStorey)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcBuildingStorey))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcBuildingStorey);
-            return null;
-         }
-
-         IFCEntity buildingStorey;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcBuildingStorey.StepId, out buildingStorey))
-            buildingStorey = new IFCBuildingStorey(ifcBuildingStorey);
-         return (buildingStorey as IFCBuildingStorey);
       }
    }
 }

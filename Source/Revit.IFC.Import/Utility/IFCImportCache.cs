@@ -45,8 +45,6 @@ namespace Revit.IFC.Import.Utility
 
       private IDictionary<int, ISet<string>> m_TypeProductToRepLabel = null;
 
-      private IDictionary<int, IFCTypeProduct> m_RepMapToTypeProduct = null;
-
       private IDictionary<int, ElementId> m_CreatedDirectShapeTypes = null;
 
       private ISet<string> m_CreatedGUIDs = null;
@@ -83,21 +81,6 @@ namespace Revit.IFC.Import.Utility
       {
          get { return m_ProjectInformationId; }
          protected set { m_ProjectInformationId = value; }
-      }
-
-      /// <summary>
-      /// A mapping from an IFCRepresentationMap entity id to an IFCTypeProduct.
-      /// If a mapping entry exists here, it means that the IFCRepresentationMap is referenced by exactly 1 IFCTypeProduct.
-      /// </summary>
-      public IDictionary<int, IFCTypeProduct> RepMapToTypeProduct
-      {
-         get
-         {
-            if (m_RepMapToTypeProduct == null)
-               m_RepMapToTypeProduct = new Dictionary<int, IFCTypeProduct>();
-            return m_RepMapToTypeProduct;
-         }
-         protected set { m_RepMapToTypeProduct = value; }
       }
 
       /// <summary>

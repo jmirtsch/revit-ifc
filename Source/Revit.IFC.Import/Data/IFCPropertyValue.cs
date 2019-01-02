@@ -24,6 +24,8 @@ using System.Text;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.IFC;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
    /// <summary>
@@ -39,14 +41,14 @@ namespace Revit.IFC.Import.Data
       /// <summary>
       /// The property that the value belongs to.
       /// </summary>
-      IFCSimpleProperty m_IFCSimpleProperty;
+      IfcSimpleProperty m_IFCSimpleProperty;
 
       /// <summary>
       /// Constructs a IFCPropertyValue object.
       /// </summary>
       /// <param name="ifcSimpleProperty">The property.</param>
       /// <param name="value">The value.</param>
-      public IFCPropertyValue(IFCSimpleProperty ifcSimpleProperty, IFCData value)
+      public IFCPropertyValue(IfcSimpleProperty ifcSimpleProperty, IFCData value)
       {
          m_IFCSimpleProperty = ifcSimpleProperty;
          m_Value = value;
@@ -111,7 +113,7 @@ namespace Revit.IFC.Import.Data
                return AsString();
          }
 
-         Importer.TheLog.LogError(m_IFCSimpleProperty.Id, "Unable to set value of parameter of type: " + Type.ToString(), false);
+         Importer.TheLog.LogError(m_IFCSimpleProperty.StepId, "Unable to set value of parameter of type: " + Type.ToString(), false);
          return null;
       }
 
@@ -128,7 +130,7 @@ namespace Revit.IFC.Import.Data
       /// </summary>
       public IFCUnit IFCUnit
       {
-         get { return m_IFCSimpleProperty != null ? m_IFCSimpleProperty.IFCUnit : null; }
+         get { return m_IFCSimpleProperty != null ? m_IFCSimpleProperty.GetUnit() : null; }
       }
 
       /// <summary>

@@ -27,117 +27,23 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Utility;
 using Revit.IFC.Import.Properties;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
    /// <summary>
    /// Class to represent IfcMaterialLayer.
    /// </summary>
-   public class IFCMaterialLayer : IFCEntity, IIFCMaterialSelect
+   public static class IFCMaterialLayer
    {
-      IFCMaterial m_Material = null;
-
-      double m_LayerThickness = 0.0;
-
-      IFCLogical m_IsVentilated = IFCLogical.False;   // default value - layer is solid material.
-
-      /// <summary>
-      /// Get the associated IFCMaterial.
-      /// </summary>
-      public IFCMaterial Material
-      {
-         get { return m_Material; }
-         protected set { m_Material = value; }
-      }
-
-      /// <summary>
-      /// Get the associated layer thickness.
-      /// </summary>
-      public double LayerThickness
-      {
-         get { return m_LayerThickness; }
-         protected set { m_LayerThickness = value; }
-      }
-
-      /// <summary>
-      /// Get the associated IsVentilated value.
-      /// </summary>
-      public IFCLogical IsVentilated
-      {
-         get { return m_IsVentilated; }
-         protected set { m_IsVentilated = value; }
-      }
-
       /// <summary>
       /// Returns true if that material layer is an air gap.  This is the case if the material layer is either ventilated,
       /// or the status is unknown (from the IFC2x3 definition).
       /// </summary>
-      public bool IsAirGap()
+      public static bool IsAirGap(this IfcMaterialLayer materialLayer)
       {
-         return (IsVentilated != IFCLogical.False);
+         return (materialLayer.IsVentilated == IfcLogicalEnum.TRUE);
       }
 
-      /// <summary>
-      /// Return the material list for this IFCMaterialSelect.
-      /// </summary>
-      public IList<IFCMaterial> GetMaterials()
-      {
-         IList<IFCMaterial> materials = new List<IFCMaterial>();
-         if (Material != null)
-            materials.Add(Material);
-         return materials;
-      }
-
-      protected IFCMaterialLayer()
-      {
-      }
-
-      protected IFCMaterialLayer(IFCAnyHandle ifcMaterialLayer)
-      {
-         Process(ifcMaterialLayer);
-      }
-
-      protected override void Process(IFCAnyHandle ifcMaterialLayer)
-      {
-         base.Process(ifcMaterialLayer);
-
-         IFCAnyHandle ifcMaterial = IFCImportHandleUtil.GetOptionalInstanceAttribute(ifcMaterialLayer, "Material");
-         if (!IFCAnyHandleUtil.IsNullOrHasNoValue(ifcMaterial))
-            Material = IFCMaterial.ProcessIFCMaterial(ifcMaterial);
-
-         bool found = false;
-         LayerThickness = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(ifcMaterialLayer, "LayerThickness", out found);
-         if (!found)
-            return;
-
-         // GetOptionalLogicalAttribute defaults to Unknown.  We want to default to false here.
-         IsVentilated = IFCImportHandleUtil.GetOptionalLogicalAttribute(ifcMaterialLayer, "IsVentilated", out found);
-         if (!found)
-            IsVentilated = IFCLogical.False;
-      }
-
-      public void Create(Document doc)
-      {
-         if (Material != null)
-            Material.Create(doc);
-      }
-
-      /// <summary>
-      /// Processes an IfcMaterialLayer entity.
-      /// </summary>
-      /// <param name="ifcMaterialLayer">The IfcMaterialLayer handle.</param>
-      /// <returns>The IFCMaterialLayer object.</returns>
-      public static IFCMaterialLayer ProcessIFCMaterialLayer(IFCAnyHandle ifcMaterialLayer)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcMaterialLayer))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcMaterialLayer);
-            return null;
-         }
-
-         IFCEntity materialLayer;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcMaterialLayer.StepId, out materialLayer))
-            materialLayer = new IFCMaterialLayer(ifcMaterialLayer);
-         return (materialLayer as IFCMaterialLayer);
-      }
    }
 }

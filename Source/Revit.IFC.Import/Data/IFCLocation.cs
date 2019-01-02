@@ -28,77 +28,50 @@ using Revit.IFC.Common.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
    /// <summary>
    /// Represents the object placement.
    /// </summary>
-   public class IFCLocation : IFCEntity
+   public static class IFCLocation
    {
-      IFCLocation m_RelativeTo = null;
-
-      Transform m_RelativeTransform = Transform.Identity;
-
-      // This is not part of the IFC definition of an IfcLocation, but is necessary for Revit in case
-      // 1. The IfcSite has a non-identity IfcLocation and 
-      // 2. An objecthas an IfcLocation that is incorrectly not associated to IfcSite.
-      // We will warn about this but correct it.
-      bool m_RelativeToSite = false;
-
-      /// <summary>
-      /// The total transform.
-      /// </summary>
-      public Transform TotalTransform
+      public static Transform TotalTransform(this IfcObjectPlacement placement)
       {
-         get { return m_RelativeTo != null ? m_RelativeTo.TotalTransform.Multiply(RelativeTransform) : RelativeTransform; }
+         IfcLocalPlacement localPlacement = placement as IfcLocalPlacement;
+         if (localPlacement != null)
+            return localPlacement.TotalTransformLocalPlacement();
+
+         Importer.TheLog.LogError(placement.StepId, "Placement not implemented", true);
+         return Transform.Identity;
+      }
+      public static Transform TotalTransformLocalPlacement(this IfcLocalPlacement placement)
+      {
+         IfcObjectPlacement relativeTo = placement.PlacementRelTo;
+         if (relativeTo == null)
+            return placement.RelativePlacement.GetAxis2PlacementTransform();
+         return relativeTo.TotalTransform().Multiply(placement.RelativePlacement.GetAxis2PlacementTransform()); 
       }
 
-      /// <summary>
-      /// The relative transform.
-      /// </summary>
-      public Transform RelativeTransform
+      internal static Transform GetPlacementTransformUnscaled(this IfcPlacement placement)
       {
-         get { return m_RelativeTransform; }
-         protected set { m_RelativeTransform = value; }
-      }
-
-      public bool RelativeToSite
-      {
-         get { return m_RelativeToSite; }
-         set { m_RelativeToSite = value; }
-      }
-
-      /// <summary>
-      /// Default constructor.
-      /// </summary>
-      protected IFCLocation()
-      {
+         return Transform.CreateTranslation(placement.Location.ProcessIFCCartesianPoint());
 
       }
-
-      /// <summary>
-      /// Constructs an IFCLocation from the IfcObjectPlacement handle.
-      /// </summary>
-      /// <param name="ifcObjectPlacement">The IfcObjectPlacement handle.</param>
-      protected IFCLocation(IFCAnyHandle ifcObjectPlacement)
+      internal static Transform GetPlacementTransform(this IfcPlacement placement)
       {
-         Process(ifcObjectPlacement);
+         IfcCartesianPoint location = placement.Location;
+         return Transform.CreateTranslation(location.ProcessScaledLengthIFCCartesianPoint());
       }
 
-      static Transform ProcessPlacementBase(IFCAnyHandle placement)
+      internal static Transform GetAxis2Placement2DTransform(this IfcAxis2Placement2D placement)
       {
-         IFCAnyHandle location = IFCAnyHandleUtil.GetInstanceAttribute(placement, "Location");
-         return Transform.CreateTranslation(IFCPoint.ProcessScaledLengthIFCCartesianPoint(location));
-      }
-
-      static Transform ProcessAxis2Placement2D(IFCAnyHandle placement)
-      {
-         IFCAnyHandle refDirection = IFCAnyHandleUtil.GetInstanceAttribute(placement, "RefDirection");
-         XYZ refDirectionX =
-             IFCAnyHandleUtil.IsNullOrHasNoValue(refDirection) ? XYZ.BasisX : IFCPoint.ProcessNormalizedIFCDirection(refDirection);
+         IfcDirection refDirection = placement.RefDirection;
+         XYZ refDirectionX = refDirection == null ? XYZ.BasisX : IFCPoint.ProcessNormalizedIFCDirection(refDirection);
          XYZ refDirectionY = new XYZ(-refDirectionX.Y, refDirectionX.X, 0.0);
 
-         Transform lcs = ProcessPlacementBase(placement);
+         Transform lcs = placement.GetPlacementTransform();
          lcs.BasisX = refDirectionX;
          lcs.BasisY = refDirectionY;
          lcs.BasisZ = refDirectionX.CrossProduct(refDirectionY);
@@ -106,16 +79,32 @@ namespace Revit.IFC.Import.Data
          return lcs;
       }
 
-      static Transform ProcessAxis2Placement3D(IFCAnyHandle placement)
+      internal static Plane GetPlane(this IfcAxis2Placement3D placement)
       {
-         IFCAnyHandle axis = IFCAnyHandleUtil.GetInstanceAttribute(placement, "Axis");
-         IFCAnyHandle refDirection = IFCAnyHandleUtil.GetInstanceAttribute(placement, "RefDirection");
-
-         XYZ axisXYZ = IFCAnyHandleUtil.IsNullOrHasNoValue(axis) ?
-             XYZ.BasisZ : IFCPoint.ProcessNormalizedIFCDirection(axis);
-         XYZ refDirectionXYZ = IFCAnyHandleUtil.IsNullOrHasNoValue(refDirection) ?
-             XYZ.BasisX : IFCPoint.ProcessNormalizedIFCDirection(refDirection);
-         Transform lcs = ProcessPlacementBase(placement);
+         XYZ origin = XYZ.Zero, x = XYZ.BasisX, y = XYZ.BasisY;
+         Transform transform = GetAxis2Placement3DTransform(placement);
+         origin = transform.OfPoint(origin);
+         x = transform.OfPoint(x);
+         y = transform.OfPoint(y);
+         return Plane.CreateByThreePoints(origin, x, y);
+      }
+      internal static Transform GetAxis2Placement3DTransform(this IfcAxis2Placement3D placement)
+      {
+         return placement.getAxis2Placement3DTransform(true);
+      }
+      internal static Transform GetAxis2Placement3DTransformUnscaled(this IfcAxis2Placement3D placement)
+      {
+         return placement.getAxis2Placement3DTransform(false);
+      }
+      private static Transform getAxis2Placement3DTransform(this IfcAxis2Placement3D placement, bool scale)
+      {
+         if (placement == null)
+            return Transform.Identity;
+         Transform lcs = scale ? placement.GetPlacementTransform() : placement.GetPlacementTransformUnscaled();
+         IfcDirection axis = placement.Axis;
+         XYZ axisXYZ = axis == null ?  XYZ.BasisZ : IFCPoint.ProcessNormalizedIFCDirection(axis);
+         IfcDirection refDirection = placement.RefDirection;
+         XYZ refDirectionXYZ = refDirection == null ?  XYZ.BasisX : IFCPoint.ProcessNormalizedIFCDirection(refDirection);
 
          XYZ lcsX = (refDirectionXYZ - refDirectionXYZ.DotProduct(axisXYZ) * axisXYZ).Normalize();
          XYZ lcsY = axisXYZ.CrossProduct(lcsX).Normalize();
@@ -123,7 +112,7 @@ namespace Revit.IFC.Import.Data
          if (lcsX.IsZeroLength() || lcsY.IsZeroLength())
          {
             Importer.TheLog.LogError(placement.StepId, "Local transform contains 0 length vectors", true);
-         }
+         }   
 
          lcs.BasisX = lcsX;
          lcs.BasisY = lcsY;
@@ -136,25 +125,19 @@ namespace Revit.IFC.Import.Data
       /// </summary>
       /// <param name="placement">The placement handle.</param>
       /// <returns>The transform.</returns>
-      public static Transform ProcessIFCAxis1Placement(IFCAnyHandle ifcPlacement)
+      public static Transform GetIFCAxis1PlacementTransform(this IfcAxis1Placement ifcPlacement)
       {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcPlacement))
+         if (ifcPlacement == null)
             return Transform.Identity;
 
          Transform transform;
          if (IFCImportFile.TheFile.TransformMap.TryGetValue(ifcPlacement.StepId, out transform))
             return transform;
 
-         if (!IFCAnyHandleUtil.IsSubTypeOf(ifcPlacement, IFCEntityType.IfcAxis1Placement))
-         {
-            Importer.TheLog.LogUnhandledSubTypeError(ifcPlacement, "IfcAxis1Placement", false);
-            transform = Transform.Identity;
-         }
+         IfcDirection ifcAxis = ifcPlacement.Axis;
+         XYZ norm = ifcAxis == null ? XYZ.BasisZ : IFCPoint.ProcessNormalizedIFCDirection(ifcAxis);
 
-         IFCAnyHandle ifcAxis = IFCAnyHandleUtil.GetInstanceAttribute(ifcPlacement, "Axis");
-         XYZ norm = IFCAnyHandleUtil.IsNullOrHasNoValue(ifcAxis) ? XYZ.BasisZ : IFCPoint.ProcessNormalizedIFCDirection(ifcAxis);
-
-         transform = ProcessPlacementBase(ifcPlacement);
+         transform = ifcPlacement.GetPlacementTransform();
          Plane arbitraryPlane = Plane.CreateByNormalAndOrigin(norm, transform.Origin);
 
          transform.BasisX = arbitraryPlane.XVec;
@@ -170,78 +153,47 @@ namespace Revit.IFC.Import.Data
       /// </summary>
       /// <param name="placement">The placement handle.</param>
       /// <returns>The transform.</returns>
-      public static Transform ProcessIFCAxis2Placement(IFCAnyHandle ifcPlacement)
+      public static Transform GetAxis2PlacementTransform(this IfcAxis2Placement ifcPlacement)
       {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcPlacement))
+         if (ifcPlacement == null)
             return Transform.Identity;
 
          Transform transform;
          if (IFCImportFile.TheFile.TransformMap.TryGetValue(ifcPlacement.StepId, out transform))
             return transform;
 
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcPlacement, IFCEntityType.IfcAxis2Placement2D))
-            transform = ProcessAxis2Placement2D(ifcPlacement);
-         else if (IFCAnyHandleUtil.IsSubTypeOf(ifcPlacement, IFCEntityType.IfcAxis2Placement3D))
-            transform = ProcessAxis2Placement3D(ifcPlacement);
+         IfcAxis2Placement2D axis2Placement2D = ifcPlacement as IfcAxis2Placement2D;
+         if (axis2Placement2D != null)
+            transform = axis2Placement2D.GetAxis2Placement2DTransform();
          else
          {
-            Importer.TheLog.LogUnhandledSubTypeError(ifcPlacement, "IfcAxis2Placement", false);
-            transform = Transform.Identity;
+            IfcAxis2Placement3D axis2Placement3D = ifcPlacement as IfcAxis2Placement3D;
+            if (axis2Placement3D != null)
+               transform = axis2Placement3D.GetAxis2Placement3DTransform();
+
+            else
+            {
+               Importer.TheLog.LogUnhandledSubTypeError(ifcPlacement, IFCEntityType.IfcAxis2Placement3D, false);
+               transform = Transform.Identity;
+            }
          }
 
          IFCImportFile.TheFile.TransformMap[ifcPlacement.StepId] = transform;
          return transform;
       }
 
-      override protected void Process(IFCAnyHandle objectPlacement)
-      {
-         base.Process(objectPlacement);
-
-         IFCAnyHandle placementRelTo = IFCAnyHandleUtil.GetInstanceAttribute(objectPlacement, "PlacementRelTo");
-         IFCAnyHandle relativePlacement = IFCAnyHandleUtil.GetInstanceAttribute(objectPlacement, "RelativePlacement");
-
-         m_RelativeTo =
-             IFCAnyHandleUtil.IsNullOrHasNoValue(placementRelTo) ? null : ProcessIFCObjectPlacement(placementRelTo);
-         RelativeTransform = ProcessIFCAxis2Placement(relativePlacement);
-
-         // If the location that this is relative to is relative to the site location, then so is this.
-         // This relies on RelativeToSite for the IfcSite local placement to be set to true before any other entities are processed.
-         if (m_RelativeTo != null)
-            RelativeToSite = m_RelativeTo.RelativeToSite;
-      }
-
-      /// <summary>
-      /// Processes an IfcObjectPlacement object.
-      /// </summary>
-      /// <param name="objectPlacement">The IfcObjectPlacement handle.</param>
-      /// <returns>The IFCLocation object.</returns>
-      public static IFCLocation ProcessIFCObjectPlacement(IFCAnyHandle ifcObjectPlacement)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcObjectPlacement))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcObjectPlacement);
-            return null;
-         }
-
-         IFCEntity location;
-         if (IFCImportFile.TheFile.EntityMap.TryGetValue(ifcObjectPlacement.StepId, out location))
-            return (location as IFCLocation);
-
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcObjectPlacement, IFCEntityType.IfcLocalPlacement))
-            return new IFCLocation(ifcObjectPlacement);
-
-         //LOG: ERROR: Not processed object placement.
-         return new IFCLocation();
-      }
-
       /// <summary>
       /// Removes the relative transform for a site.
       /// </summary>
-      public static void RemoveRelativeTransformForSite(IFCSite site)
+      public static void RemoveRelativeTransformForSite(IfcSite site)
       {
-         if (site == null || site.ObjectLocation == null || site.ObjectLocation.RelativeTransform == null)
+         if (site == null)
             return;
-         site.ObjectLocation.RelativeTransform = Transform.Identity;
+         IfcLocalPlacement localPlacement = site.Placement as IfcLocalPlacement;
+         if (localPlacement == null)
+            return;
+
+         localPlacement.RelativePlacement = site.Database.Factory.XYPlanePlacement;
       }
    }
 }

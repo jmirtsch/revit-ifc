@@ -11,27 +11,15 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
    /// <summary>
    /// Class that represents IfcAdvancedFace entity
    /// </summary>
-   public class IFCAdvancedFace : IFCFaceSurface
+   public static class IFCAdvancedFace 
    {
-      protected IFCAdvancedFace()
-      {
-      }
-
-      protected IFCAdvancedFace(IFCAnyHandle ifcAdvancedFace)
-      {
-         Process(ifcAdvancedFace);
-      }
-
-      protected override void Process(IFCAnyHandle ifcAdvancedFace)
-      {
-         base.Process(ifcAdvancedFace);
-      }
-
       /// <summary>
       /// Create geometry for a particular representation item.
       /// </summary>
@@ -39,7 +27,7 @@ namespace Revit.IFC.Import.Data
       /// <param name="lcs">Local coordinate system for the geometry, without scale.</param>
       /// <param name="scaledLcs">Local coordinate system for the geometry, including scale, potentially non-uniform.</param>
       /// <param name="guid">The guid of an element for which represntation is being created.</param>
-      protected override void CreateShapeInternal(IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
+      internal static bool CreateShapeAdvancedFace(this IfcAdvancedFace advancedFace, CreateElementIfcCache cache, IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
       {
          if (shapeEditScope.BuilderType != IFCShapeBuilderType.BrepBuilder)
          {
@@ -47,56 +35,39 @@ namespace Revit.IFC.Import.Data
          }
 
          // We may revisit this face on a second pass, after a first attempt to create a Solid failed.  Ignore this face.
-         if (!IsValidForCreation)
-            return;
+         if (cache.InvalidForCreation.Contains(advancedFace.StepId))
+            return false;
 
          BrepBuilderScope brepBuilderScope = shapeEditScope.BuilderScope as BrepBuilderScope;
 
          Transform localTransform = lcs != null ? lcs : Transform.Identity;
 
-         brepBuilderScope.StartCollectingFace(FaceSurface, localTransform, SameSense, GetMaterialElementId(shapeEditScope));
+         bool isValidForCreation = true;
+         brepBuilderScope.StartCollectingFace(advancedFace.FaceSurface, localTransform, advancedFace.SameSense, advancedFace.GetMaterialElementId(cache, shapeEditScope));
 
-         foreach (IFCFaceBound faceBound in Bounds)
+         foreach (IfcFaceBound faceBound in advancedFace.Bounds)
          {
             try
             {
                brepBuilderScope.InitializeNewLoop();
 
-               faceBound.CreateShape(shapeEditScope, lcs, scaledLcs, guid);
-               IsValidForCreation = faceBound.IsValidForCreation || (!brepBuilderScope.HaveActiveFace());
+               faceBound.CreateShapeFaceBound(cache, shapeEditScope, lcs, scaledLcs, guid);
+               isValidForCreation = !cache.InvalidForCreation.Contains(faceBound.StepId) || (!brepBuilderScope.HaveActiveFace());
 
-               brepBuilderScope.StopConstructingLoop(IsValidForCreation);
+               brepBuilderScope.StopConstructingLoop(isValidForCreation);
 
-               if (!IsValidForCreation)
+               if (!isValidForCreation)
                   break;
             }
             catch
             {
-               IsValidForCreation = false;
+               cache.InvalidForCreation.Add(advancedFace.StepId);
                break;
             }
          }
 
-         brepBuilderScope.StopCollectingFace(IsValidForCreation);
-      }
-
-      /// <summary>
-      /// Create an IFCAdvancedFace object from a handle of type IfcAdvancedFace.
-      /// </summary>
-      /// <param name="ifcAdvancedFace">The IFC handle.</param>
-      /// <returns>The IFCAdvancedFace object.</returns>
-      public static IFCAdvancedFace ProcessIFCAdvancedFace(IFCAnyHandle ifcAdvancedFace)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcAdvancedFace))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcAdvancedFace);
-            return null;
-         }
-
-         IFCEntity face;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcAdvancedFace.StepId, out face))
-            face = new IFCAdvancedFace(ifcAdvancedFace);
-         return (face as IFCAdvancedFace);
+         brepBuilderScope.StopCollectingFace(isValidForCreation);
+         return true;
       }
    }
 }

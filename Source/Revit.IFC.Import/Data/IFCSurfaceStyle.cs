@@ -28,73 +28,12 @@ using Revit.IFC.Common.Enums;
 using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
-   public class IFCSurfaceStyle : IFCPresentationStyle
+   public static class IFCSurfaceStyle
    {
-      private IFCSurfaceSide m_SurfaceSide = IFCSurfaceSide.Both;
-
-      private IFCSurfaceStyleShading m_ShadingStyle = null;
-
-      private ElementId m_CreatedElementId = ElementId.InvalidElementId;
-
-      /// <summary>
-      /// Get the IFCSurfaceStyleShading, if it is set.
-      /// </summary>
-      public IFCSurfaceStyleShading ShadingStyle
-      {
-         get { return m_ShadingStyle; }
-         protected set { m_ShadingStyle = value; }
-      }
-
-      /// <summary>
-      /// Get the side for which the style is set: inside, outside, or both.
-      /// </summary>
-      public IFCSurfaceSide SurfaceSide
-      {
-         get { return m_SurfaceSide; }
-         protected set { m_SurfaceSide = value; }
-      }
-
-      protected IFCSurfaceStyle()
-      {
-      }
-
-      override protected void Process(IFCAnyHandle item)
-      {
-         base.Process(item);
-
-         SurfaceSide = IFCEnums.GetSafeEnumerationAttribute<IFCSurfaceSide>(item, "Side", IFCSurfaceSide.Both);
-
-         HashSet<IFCAnyHandle> styles = IFCAnyHandleUtil.GetAggregateInstanceAttribute<HashSet<IFCAnyHandle>>(item, "Styles");
-         if (styles == null || styles.Count == 0)
-            Importer.TheLog.LogError(item.StepId, "No style information found, ignoring.", true);
-
-         foreach (IFCAnyHandle style in styles)
-         {
-            try
-            {
-               if (IFCAnyHandleUtil.IsSubTypeOf(style, IFCEntityType.IfcSurfaceStyleShading))
-               {
-                  if (ShadingStyle == null)
-                     ShadingStyle = IFCSurfaceStyleShading.ProcessIFCSurfaceStyleShading(style);
-                  else
-                     Importer.TheLog.LogWarning(item.StepId, "Duplicate IfcSurfaceStyleShading, ignoring.", false);
-               }
-               else
-                  Importer.TheLog.LogUnhandledSubTypeError(style, "IfcSurfaceStyleElementSelect", false);
-            }
-            catch (Exception ex)
-            {
-               Importer.TheLog.LogError(style.StepId, ex.Message, false);
-            }
-         }
-      }
-
-      protected IFCSurfaceStyle(IFCAnyHandle item)
-      {
-         Process(item);
-      }
 
       /// <summary>
       /// Create the material associated to the element, and return the id.
@@ -105,15 +44,16 @@ namespace Revit.IFC.Import.Data
       /// <param name="idOverride">The id of the parent item, used if forcedName is used.</param>
       /// <returns>The material id.</returns>
       /// <remarks>If forcedName is not null, this will not store the created element id in this class.</remarks>
-      public ElementId Create(Document doc, string forcedName, string suggestedName, int idOverride)
+      public static ElementId CreateSurfaceStyle(this IfcSurfaceStyle surfaceStyle, CreateElementIfcCache cache, string forcedName, string suggestedName, int idOverride)
       {
          try
          {
-            bool overrideName = (forcedName != null) && (string.Compare(forcedName, Name) != 0);
-            if (!overrideName && m_CreatedElementId != ElementId.InvalidElementId)
-               return m_CreatedElementId;
+            bool overrideName = (forcedName != null) && (string.Compare(forcedName, surfaceStyle.Name) != 0);
+            ElementId result = ElementId.InvalidElementId;
+            if (!overrideName && cache.CreatedElements.TryGetValue(surfaceStyle.StepId, out result))
+               return result;
 
-            string name = overrideName ? forcedName : Name;
+            string name = overrideName ? forcedName : surfaceStyle.Name;
             if (string.IsNullOrEmpty(name))
             {
                if (!string.IsNullOrEmpty(suggestedName))
@@ -121,60 +61,44 @@ namespace Revit.IFC.Import.Data
                else
                   name = "IFC Surface Style";
             }
-            int id = overrideName ? idOverride : Id;
-
-            if (IsValidForCreation)
+            int id = overrideName ? idOverride : surfaceStyle.StepId;
+            if(!cache.InvalidForCreation.Contains(id))
             {
                Color color = null;
                int? transparency = null;
                int? shininess = null;
                int? smoothness = null;
 
-               IFCSurfaceStyleShading shading = ShadingStyle;
+               IfcSurfaceStyleShading shading = surfaceStyle.Styles.OfType<IfcSurfaceStyleShading>().FirstOrDefault();
                if (shading != null)
                {
-                  color = shading.GetSurfaceColor();
-                  transparency = (int)(shading.Transparency * 100 + 0.5);
-                  shininess = shading.GetShininess();
-                  smoothness = shading.GetSmoothness();
+                  color = shading.SurfaceColour.CreateColor();
+                  IfcSurfaceStyleRendering rendering = shading as IfcSurfaceStyleRendering;
+                  if (rendering != null)
+                  {
+                     transparency = (int)(rendering.Transparency * 100 + 0.5);
+                     shininess = rendering.GetShininess();
+                     smoothness = rendering.GetSmoothness();
+                  }
                }
 
                IFCMaterialInfo materialInfo =
                    IFCMaterialInfo.Create(color, transparency, shininess, smoothness, ElementId.InvalidElementId);
-               ElementId createdElementId = IFCMaterial.CreateMaterialElem(doc, id, name, materialInfo);
+               ElementId createdElementId = IFCMaterial.CreateMaterialElem(cache, id, name, materialInfo);
                if (!overrideName)
-                  m_CreatedElementId = createdElementId;
+                  cache.CreatedElements[surfaceStyle.StepId] = createdElementId;
                return createdElementId;
             }
-            else
-               IsValidForCreation = false;
          }
          catch (Exception ex)
          {
-            IsValidForCreation = false;
-            Importer.TheLog.LogCreationError(this, ex.Message, false);
+            cache.InvalidForCreation.Add(surfaceStyle.StepId);
+            Importer.TheLog.LogCreationError(surfaceStyle, ex.Message, false);
          }
 
          return ElementId.InvalidElementId;
       }
 
-      /// <summary>
-      /// Processes an IfcSurfaceStyle entity handle.
-      /// </summary>
-      /// <param name="ifcSurfaceStyle">The IfcSurfaceStyle handle.</param>
-      /// <returns>The IFCSurfaceStyle object.</returns>
-      public static IFCSurfaceStyle ProcessIFCSurfaceStyle(IFCAnyHandle ifcSurfaceStyle)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcSurfaceStyle))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcSurfaceStyle);
-            return null;
-         }
-
-         IFCEntity surfaceStyle;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcSurfaceStyle.StepId, out surfaceStyle))
-            surfaceStyle = new IFCSurfaceStyle(ifcSurfaceStyle);
-         return (surfaceStyle as IFCSurfaceStyle);
-      }
+      
    }
 }

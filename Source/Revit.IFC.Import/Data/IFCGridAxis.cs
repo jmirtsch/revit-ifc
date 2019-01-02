@@ -29,6 +29,8 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
    /// <summary>
@@ -38,81 +40,9 @@ namespace Revit.IFC.Import.Data
    /// Grid type from the template file associated with this import.  As such, we do
    /// not guarantee that the grid lines will look the same as in the original application,
    /// but they should be in the right place and orientation.</remarks>
-   public class IFCGridAxis : IFCEntity
+   public static class IFCGridAxis
    {
-      private string m_AxisTag = null;
-
-      private IFCCurve m_AxisCurve = null;
-
-      private bool m_SameSense = true;
-
-      // If this value is set, then this axis is actually a duplicate of an already created axis.  
-      // Use the original axis instead.
-      private int m_DuplicateAxisId = -1;
-
-      private ElementId m_CreatedElementId = ElementId.InvalidElementId;
-
-      /// <summary>
-      /// The optional tag for this grid line.
-      /// </summary>
-      public string AxisTag
-      {
-         get { return m_AxisTag; }
-         protected set { m_AxisTag = value; }
-      }
-
-      /// <summary>
-      /// The underlying curve for the grid line.
-      /// </summary>
-      public IFCCurve AxisCurve
-      {
-         get { return m_AxisCurve; }
-         protected set { m_AxisCurve = value; }
-      }
-
-      /// <summary>
-      /// Whether or not the grid line orientation is the same as the underlying curve, or reversed.
-      /// This will determine the default position of the grid head.
-      /// </summary>
-      public bool SameSense
-      {
-         get { return m_SameSense; }
-         protected set { m_SameSense = value; }
-      }
-
-      public int DuplicateAxisId
-      {
-         get { return m_DuplicateAxisId; }
-         protected set { m_DuplicateAxisId = value; }
-      }
-
-      /// <summary>
-      /// Returns the main element id associated with this object.  Only valid after the call to Create(Document).
-      /// </summary>
-      public ElementId CreatedElementId
-      {
-         get { return m_CreatedElementId; }
-         protected set { m_CreatedElementId = value; }
-      }
-
-      /// <summary>
-      /// Default constructor.
-      /// </summary>
-      protected IFCGridAxis()
-      {
-
-      }
-
-      /// <summary>
-      /// Constructs an IFCGridAxis from the IfcGridAxis handle.
-      /// </summary>
-      /// <param name="ifcGridAxis">The IfcGridAxis handle.</param>
-      protected IFCGridAxis(IFCAnyHandle ifcGridAxis)
-      {
-         Process(ifcGridAxis);
-      }
-
-      private bool AreLinesEqual(Line line1, Line line2)
+      private static bool AreLinesEqual(Line line1, Line line2)
       {
          if (!line1.IsBound || !line2.IsBound)
          {
@@ -132,7 +62,7 @@ namespace Revit.IFC.Import.Data
          return false;
       }
 
-      private bool AreArcsEqual(Arc arc1, Arc arc2)
+      private static bool AreArcsEqual(Arc arc1, Arc arc2)
       {
          if (!arc1.Center.IsAlmostEqualTo(arc2.Center))
             return false;
@@ -148,11 +78,11 @@ namespace Revit.IFC.Import.Data
          return false;
       }
 
-      private int FindMatchingGrid(IList<Curve> otherCurves, int id, ref IList<Curve> curves, ref int curveCount)
+      private static int FindMatchingGrid(this IfcGridAxis axis, IList<Curve> otherCurves, int id, ref IList<Curve> curves, ref int curveCount)
       {
          if (curves == null)
          {
-            curves = AxisCurve.GetCurves();
+            curves = axis.AxisCurve.GetCurves();
             curveCount = curves.Count;
          }
 
@@ -179,15 +109,15 @@ namespace Revit.IFC.Import.Data
          return sameCurves ? id : -1;
       }
 
-      private int FindMatchingGrid(IFCGridAxis gridAxis, ref IList<Curve> curves, ref int curveCount)
+      private static int FindMatchingGrid(this IfcGridAxis gridAxis, IfcGridAxis otherGridAxis, ref IList<Curve> curves, ref int curveCount)
       {
-         IList<Curve> otherCurves = gridAxis.AxisCurve.GetCurves();
-         int id = gridAxis.Id;
-         return FindMatchingGrid(otherCurves, id, ref curves, ref curveCount);
+         IList<Curve> otherCurves = otherGridAxis.AxisCurve.GetCurves();
+         int id = otherGridAxis.StepId;
+         return gridAxis.FindMatchingGrid(otherCurves, id, ref curves, ref curveCount);
       }
 
       // Revit doesn't allow grid lines to have the same name.  This routine makes a unique variant.
-      private string MakeAxisTagUnique(string axisTag)
+      private static string MakeAxisTagUnique(IDictionary<string, IfcGridAxis> gridAxes, string axisTag)
       {
          // Don't set the name.
          if (string.IsNullOrWhiteSpace(axisTag))
@@ -195,7 +125,6 @@ namespace Revit.IFC.Import.Data
 
          int counter = 2;
 
-         IDictionary<string, IFCGridAxis> gridAxes = IFCImportFile.TheFile.IFCProject.GridAxes;
          do
          {
             string uniqueAxisTag = axisTag + "-" + counter;
@@ -210,7 +139,7 @@ namespace Revit.IFC.Import.Data
       }
 
       // This routine should be unnecessary if we called MakeAxisTagUnique correctly, but better to be safe.
-      private void SetAxisTagUnique(Grid grid, string axisTag)
+      private static void SetAxisTagUnique(this IfcGridAxis gridAxis, Grid grid, string axisTag)
       {
          if (grid != null && axisTag != null)
          {
@@ -230,7 +159,7 @@ namespace Revit.IFC.Import.Data
             while (counter < 1000);
 
             if (counter >= 1000)
-               Importer.TheLog.LogWarning(Id, "Couldn't set name: '" + axisTag + "' for Grid, reverting to default.", false);
+               Importer.TheLog.LogWarning(gridAxis.StepId, "Couldn't set name: '" + axisTag + "' for Grid, reverting to default.", false);
          }
       }
 
@@ -238,20 +167,10 @@ namespace Revit.IFC.Import.Data
       /// Processes IfcGridAxis attributes.
       /// </summary>
       /// <param name="ifcGridAxis">The IfcGridAxis handle.</param>
-      protected override void Process(IFCAnyHandle ifcGridAxis)
+      internal static void AddGridToAggregate(this IfcGridAxis gridAxis, ProjectAggregate aggregate, CreateElementIfcCache cache)
       {
-         base.Process(ifcGridAxis);
-
-         AxisTag = IFCImportHandleUtil.GetOptionalStringAttribute(ifcGridAxis, "AxisTag", null);
-         if (AxisTag == null)
-            AxisTag = "Z";    // arbitrary; all Revit Grids have names.
-
-         IFCAnyHandle axisCurve = IFCImportHandleUtil.GetRequiredInstanceAttribute(ifcGridAxis, "AxisCurve", true);
-         AxisCurve = IFCCurve.ProcessIFCCurve(axisCurve);
-
-         bool found = false;
-         bool sameSense = IFCImportHandleUtil.GetRequiredBooleanAttribute(ifcGridAxis, "SameSense", out found);
-         SameSense = found ? sameSense : true;
+         if(string.IsNullOrEmpty(gridAxis.Name))
+            gridAxis.Name = "Z";    // arbitrary; all Revit Grids have names.
 
          // We are going to check if this grid axis is a vertical duplicate of any existing axis.
          // If so, we will throw an exception so that we don't create duplicate grids.
@@ -260,7 +179,7 @@ namespace Revit.IFC.Import.Data
          int curveCount = 0;
 
          ElementId gridId = ElementId.InvalidElementId;
-         if (Importer.TheCache.GridNameToElementMap.TryGetValue(AxisTag, out gridId))
+         if (Importer.TheCache.GridNameToElementMap.TryGetValue(gridAxis.Name, out gridId))
          {
             Grid grid = IFCImportFile.TheFile.Document.GetElement(gridId) as Grid;
             if (grid != null)
@@ -270,40 +189,38 @@ namespace Revit.IFC.Import.Data
                if (gridCurve != null)
                {
                   otherCurves.Add(gridCurve);
-                  int matchingGridId = FindMatchingGrid(otherCurves, grid.Id.IntegerValue, ref curves, ref curveCount);
+                  int matchingGridId = gridAxis.FindMatchingGrid(otherCurves, grid.Id.IntegerValue, ref curves, ref curveCount);
 
                   if (matchingGridId != -1)
                   {
                      Importer.TheCache.UseGrid(grid);
-                     CreatedElementId = grid.Id;
+                     cache.CreatedElements[gridAxis.StepId] = grid.Id;
                      return;
                   }
                }
             }
          }
 
-         IDictionary<string, IFCGridAxis> gridAxes = IFCImportFile.TheFile.IFCProject.GridAxes;
-         IFCGridAxis gridAxis = null;
-         if (gridAxes.TryGetValue(AxisTag, out gridAxis))
+         IfcGridAxis axis = null;
+         if (aggregate.GridAxes.TryGetValue(gridAxis.Name, out axis))
          {
-            int matchingGridId = FindMatchingGrid(gridAxis, ref curves, ref curveCount);
+            int matchingGridId = gridAxis.FindMatchingGrid(axis, ref curves, ref curveCount);
             if (matchingGridId != -1)
             {
-               DuplicateAxisId = matchingGridId;
+               //DuplicateAxisId = matchingGridId;
                return;
             }
             else
             {
                // Revit doesn't allow grid lines to have the same name.  If it isn't a duplicate, rename it.
                // Note that this will mean that we may miss some "duplicate" grid lines because of the renaming.
-               AxisTag = MakeAxisTagUnique(AxisTag);
+               gridAxis.Name = MakeAxisTagUnique(aggregate.GridAxes, gridAxis.Name);
             }
          }
-
-         gridAxes.Add(new KeyValuePair<string, IFCGridAxis>(AxisTag, this));
+         aggregate.GridAxes[gridAxis.Name] = gridAxis;
       }
 
-      private Grid CreateArcGridAxis(Document doc, Arc curve)
+      private static Grid CreateArcGridAxis(Document doc, Arc curve)
       {
          if (doc == null || curve == null)
             return null;
@@ -322,11 +239,12 @@ namespace Revit.IFC.Import.Data
       /// </summary>
       /// <param name="doc">The document.</param>
       /// <param name="lcs">The local coordinate system transform.</param>
-      public void Create(Document doc, Transform lcs)
+      public static ElementId CreateGridAxis(this IfcGridAxis gridAxis, CreateElementIfcCache cache, Transform lcs)
       {
-         if (!IsValidForCreation)
-            return;
+         if (cache.InvalidForCreation.Contains(gridAxis.StepId))
+            return ElementId.InvalidElementId;
 
+         Document doc = cache.Document;
          // These are hardwired values to ensure that the Grid is visible in the
          // current view, in feet.  Note that there is an assumption that building storeys
          // would not be placed too close to one another; if they are, and they use different
@@ -337,51 +255,53 @@ namespace Revit.IFC.Import.Data
 
          double originalZ = (lcs != null) ? lcs.Origin.Z : 0.0;
 
-         if (CreatedElementId != ElementId.InvalidElementId)
+         ElementId existing;
+         if (cache.CreatedElements.TryGetValue(gridAxis.StepId, out existing))
          {
-            Grid existingGrid = doc.GetElement(CreatedElementId) as Grid;
+            Grid existingGrid = doc.GetElement(existing) as Grid;
             if (existingGrid != null)
             {
                Outline outline = existingGrid.GetExtents();
                existingGrid.SetVerticalExtents(Math.Min(originalZ - bottomOffset, outline.MinimumPoint.Z),
-                   Math.Max(originalZ + topOffset, outline.MaximumPoint.Z));
+                  Math.Max(originalZ + topOffset, outline.MaximumPoint.Z));
             }
-            return;
+            return existing;
          }
 
-         if (AxisCurve == null)
+         IfcCurve axisCurve = gridAxis.AxisCurve;
+         if(axisCurve == null)
          {
-            Importer.TheLog.LogError(Id, "Couldn't find axis curve for grid line, ignoring.", false);
-            IsValidForCreation = false;
-            return;
+            Importer.TheLog.LogError(gridAxis.StepId, "Couldn't find axis curve for grid line, ignoring.", false);
+            cache.InvalidForCreation.Add(gridAxis.StepId);
+            return ElementId.InvalidElementId;
          }
 
-         IList<Curve> curves = AxisCurve.GetCurves();
+         IList<Curve> curves = axisCurve.GetCurves();
          int numCurves = curves.Count;
          if (numCurves == 0)
          {
-            Importer.TheLog.LogError(AxisCurve.Id, "Couldn't find axis curve for grid line, ignoring.", false);
-            IsValidForCreation = false;
-            return;
+            Importer.TheLog.LogError(axisCurve.StepId, "Couldn't find axis curve for grid line, ignoring.", false);
+            cache.InvalidForCreation.Add(gridAxis.StepId);
+            return ElementId.InvalidElementId;
          }
 
          if (numCurves > 1)
-            Importer.TheLog.LogError(AxisCurve.Id, "Found multiple curve segments for grid line, ignoring all but first.", false);
+            Importer.TheLog.LogError(axisCurve.StepId, "Found multiple curve segments for grid line, ignoring all but first.", false);
 
          Grid grid = null;
 
          Curve curve = curves[0].CreateTransformed(lcs);
          if (curve == null)
          {
-            Importer.TheLog.LogError(AxisCurve.Id, "Couldn't create transformed axis curve for grid line, ignoring.", false);
-            IsValidForCreation = false;
-            return;
+            Importer.TheLog.LogError(axisCurve.StepId, "Couldn't create transformed axis curve for grid line, ignoring.", false);
+            cache.InvalidForCreation.Add(gridAxis.StepId);
+            return ElementId.InvalidElementId;
          }
 
          if (!curve.IsBound)
          {
             curve.MakeBound(-100, 100);
-            Importer.TheLog.LogWarning(AxisCurve.Id, "Creating arbitrary bounds for unbounded grid line.", false);
+            Importer.TheLog.LogWarning(axisCurve.StepId, "Creating arbitrary bounds for unbounded grid line.", false);
          }
 
          // Grid.create can throw, so catch the exception if it does.
@@ -397,21 +317,21 @@ namespace Revit.IFC.Import.Data
                grid = Grid.Create(doc, curve as Line);
             else
             {
-               Importer.TheLog.LogError(AxisCurve.Id, "Couldn't create grid line from curve of type " + curve.GetType().ToString() + ", expected line or arc.", false);
-               IsValidForCreation = false;
-               return;
+               Importer.TheLog.LogError(axisCurve.StepId, "Couldn't create grid line from curve of type " + curve.GetType().ToString() + ", expected line or arc.", false);
+               cache.InvalidForCreation.Add(gridAxis.StepId);
+               return ElementId.InvalidElementId;
             }
          }
          catch (Exception ex)
          {
-            Importer.TheLog.LogError(AxisCurve.Id, ex.Message, false);
-            IsValidForCreation = false;
-            return;
+            Importer.TheLog.LogError(axisCurve.StepId, ex.Message, false);
+            cache.InvalidForCreation.Add(gridAxis.StepId);
+            return ElementId.InvalidElementId;
          }
 
          if (grid != null)
          {
-            SetAxisTagUnique(grid, AxisTag);
+            gridAxis.SetAxisTagUnique(grid, gridAxis.AxisTag);
 
             // We will try to "grid match" as much as possible to avoid duplicate grid lines.  As such,
             // we want the remaining grid lines to extend to the current level.
@@ -420,38 +340,9 @@ namespace Revit.IFC.Import.Data
             // more likely in theory than practice.
             grid.SetVerticalExtents(originalZ - bottomOffset, originalZ + topOffset);
 
-            CreatedElementId = grid.Id;
+            return grid.Id;
          }
-      }
-
-      /// <summary>
-      /// Processes an IfcGridAxis object.
-      /// </summary>
-      /// <param name="ifcGridAxis">The IfcGridAxis handle.</param>
-      /// <returns>The IFCGridAxis object.</returns>
-      public static IFCGridAxis ProcessIFCGridAxis(IFCAnyHandle ifcGridAxis)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcGridAxis))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcGridAxis);
-            return null;
-         }
-
-         IFCEntity gridAxis;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcGridAxis.StepId, out gridAxis))
-         {
-            try
-            {
-               gridAxis = new IFCGridAxis(ifcGridAxis);
-            }
-            catch (Exception ex)
-            {
-               Importer.TheLog.LogError(ifcGridAxis.StepId, ex.Message, false);
-               return null;
-            }
-         }
-
-         return (gridAxis as IFCGridAxis);
+         return ElementId.InvalidElementId;
       }
    }
 }

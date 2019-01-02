@@ -29,63 +29,24 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
-   /// <summary>
-   /// Class that represents IFCLine entity
-   /// </summary>
-   public class IFCLine : IFCCurve
+   public static class IFCLine
    {
-      protected IFCLine()
+      public static Line Line(this IfcLine line)
       {
-      }
-
-      protected IFCLine(IFCAnyHandle line)
-      {
-         Process(line);
-      }
-
-      protected override void Process(IFCAnyHandle ifcCurve)
-      {
-         base.Process(ifcCurve);
-         IFCAnyHandle pnt = IFCImportHandleUtil.GetRequiredInstanceAttribute(ifcCurve, "Pnt", false);
-         if (pnt == null)
-            return;
-
-         IFCAnyHandle dir = IFCImportHandleUtil.GetRequiredInstanceAttribute(ifcCurve, "Dir", false);
-         if (dir == null)
-            return;
-
-         XYZ pntXYZ = IFCPoint.ProcessScaledLengthIFCCartesianPoint(pnt);
-         XYZ dirXYZ = IFCUnitUtil.ScaleLength(IFCPoint.ProcessIFCVector(dir));
-         ParametericScaling = dirXYZ.GetLength();
-         if (MathUtil.IsAlmostZero(ParametericScaling))
+         XYZ pntXYZ = IFCPoint.ProcessScaledLengthIFCCartesianPoint(line.Pnt);
+         XYZ dirXYZ = IFCUnitUtil.ScaleLength(IFCPoint.ProcessIFCVector(line.Dir));
+         double parametericScaling = dirXYZ.GetLength();
+         if (MathUtil.IsAlmostZero(parametericScaling))
          {
-            Importer.TheLog.LogWarning(ifcCurve.StepId, "Line has zero length, ignoring.", false);
-            return;
-         }
-
-         Curve = Line.CreateUnbound(pntXYZ, dirXYZ / ParametericScaling);
-      }
-
-      /// <summary>
-      /// Create an IFCLine object from a handle of type IfcLine
-      /// </summary>
-      /// <param name="ifcLine">The IFC handle</param>
-      /// <returns>The IFCLine object</returns>
-      public static IFCLine ProcessIFCLine(IFCAnyHandle ifcLine)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcLine))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcBSplineCurveWithKnots);
+            Importer.TheLog.LogWarning(line.Index, "Line has zero length, ignoring.", false);
             return null;
          }
 
-         IFCEntity line = null;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcLine.StepId, out line))
-            line = new IFCLine(ifcLine);
-
-         return (line as IFCLine);
+         return Autodesk.Revit.DB.Line.CreateUnbound(pntXYZ, dirXYZ / parametericScaling);
       }
    }
 }

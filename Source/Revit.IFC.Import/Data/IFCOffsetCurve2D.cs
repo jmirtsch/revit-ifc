@@ -29,71 +29,58 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
-   /// <summary>
-   /// Class that represents IFCOffsetCurve2D entity
-   /// </summary>
-   public class IFCOffsetCurve2D : IFCCurve
+   public static class IFCOffsetCurve2D
    {
-      protected IFCOffsetCurve2D()
+      public static Curve Curve(this IfcOffsetCurve2D offsetCurve2D)
       {
-      }
-
-      protected IFCOffsetCurve2D(IFCAnyHandle offsetCurve)
-      {
-         Process(offsetCurve);
-      }
-
-      protected override void Process(IFCAnyHandle ifcCurve)
-      {
-         base.Process(ifcCurve);
-
-         IFCAnyHandle basisCurve = IFCImportHandleUtil.GetRequiredInstanceAttribute(ifcCurve, "BasisCurve", false);
-         if (basisCurve == null)
-            return;
-
-         IFCAnyHandle dir = IFCImportHandleUtil.GetRequiredInstanceAttribute(ifcCurve, "RefDirection", false);
-
-         bool found = false;
-         double distance = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(ifcCurve, "Distance", out found);
-         if (!found)
+         IfcCurve basisCurve = offsetCurve2D.BasisCurve;
+         double distance = IFCUnitUtil.ScaleLength(offsetCurve2D.Distance);
+         if (double.IsNaN(distance))
             distance = 0.0;
 
-         IFCCurve ifcBasisCurve = IFCCurve.ProcessIFCCurve(basisCurve);
-         XYZ dirXYZ = (dir == null) ? ifcBasisCurve.GetNormal() : IFCPoint.ProcessNormalizedIFCDirection(dir);
+         Curve curve = basisCurve.Curve();
+         XYZ dirXYZ = basisCurve.GetNormal();
 
          try
          {
-            if (ifcBasisCurve.Curve != null)
-               Curve = ifcBasisCurve.Curve.CreateOffset(distance, XYZ.BasisZ);
-            else if (ifcBasisCurve.CurveLoop != null)
-               CurveLoop = CurveLoop.CreateViaOffset(ifcBasisCurve.CurveLoop, distance, XYZ.BasisZ);
+            if (curve != null)
+               return curve.CreateOffset(distance, XYZ.BasisZ);
          }
          catch
          {
-            Importer.TheLog.LogError(ifcCurve.StepId, "Couldn't create offset curve.", false);
+            Importer.TheLog.LogError(offsetCurve2D.StepId, "Couldn't create offset curve.", false);
          }
+         return null;
       }
 
-      /// <summary>
-      /// Create an IFCOffsetCurve2D object from a handle of type IfcOffsetCurve2D
-      /// </summary>
-      /// <param name="ifcOffsetCurve2D">The IFC handle</param>
-      /// <returns>The IFCOffsetCurve2D object</returns>
-      public static IFCOffsetCurve2D ProcessIFCOffsetCurve2D(IFCAnyHandle ifcOffsetCurve2D)
+      public static CurveLoop CurveLoop(this IfcOffsetCurve2D offsetCurve2D)
       {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcOffsetCurve2D))
+         IfcCurve basisCurve = offsetCurve2D.BasisCurve;
+         double distance = IFCUnitUtil.ScaleLength(offsetCurve2D.Distance);
+         if (double.IsNaN(distance))
+            distance = 0.0;
+
+         CurveLoop curve = basisCurve.GetCurveLoop();
+         XYZ dirXYZ = basisCurve.GetNormal();
+
+         try
          {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcOffsetCurve2D);
-            return null;
+            CurveLoop curveLoop = basisCurve.CurveLoop();
+            if (curveLoop != null)
+            {
+               return Autodesk.Revit.DB.CurveLoop.CreateViaOffset(curveLoop, distance, XYZ.BasisZ);
+
+            }
          }
-
-         IFCEntity offsetCurve2D = null;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcOffsetCurve2D.StepId, out offsetCurve2D))
-            offsetCurve2D = new IFCOffsetCurve2D(ifcOffsetCurve2D);
-
-         return (offsetCurve2D as IFCOffsetCurve2D);
+         catch
+         {
+            Importer.TheLog.LogError(offsetCurve2D.StepId, "Couldn't create offset Curve Looop.", false);
+         }
+         return null;
       }
    }
 }

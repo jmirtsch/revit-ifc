@@ -28,6 +28,8 @@ using Revit.IFC.Common.Enums;
 using Revit.IFC.Import.Utility;
 using Revit.IFC.Import.Enums;
 
+using GeometryGym.Ifc;
+
 using UnitName = Autodesk.Revit.DB.DisplayUnitType;
 
 namespace Revit.IFC.Import.Data
@@ -35,9 +37,11 @@ namespace Revit.IFC.Import.Data
    /// <summary>
    /// Presents an IFC unit.
    /// </summary>
-   public class IFCUnit : IFCEntity
+   public class IFCUnit
    {
       /// <summary>
+      internal int Id { get; set; }
+
       double m_ScaleFactor = 1.0;
 
       double m_OffsetFactor = 0.0;
@@ -127,9 +131,9 @@ namespace Revit.IFC.Import.Data
       {
       }
 
-      protected IFCUnit(IFCAnyHandle unit)
+      internal IFCUnit(IfcUnit unit)
       {
-         Process(unit);
+         Process(unit); 
       }
 
       /// <summary>
@@ -165,33 +169,51 @@ namespace Revit.IFC.Import.Data
          return (int)(inValue * ScaleFactor - OffsetFactor);
       }
 
-      protected override void Process(IFCAnyHandle item)
+      protected void Process(IfcUnit unit)
       {
-         base.Process(item);
-         if (IFCAnyHandleUtil.IsSubTypeOf(item, IFCEntityType.IfcDerivedUnit))
-            ProcessIFCDerivedUnit(item);
-         else if (IFCAnyHandleUtil.IsSubTypeOf(item, IFCEntityType.IfcMeasureWithUnit))
-            ProcessIFCMeasureWithUnit(item);
-         else if (IFCAnyHandleUtil.IsSubTypeOf(item, IFCEntityType.IfcMonetaryUnit))
-            ProcessIFCMonetaryUnit(item);
-         else if (IFCAnyHandleUtil.IsSubTypeOf(item, IFCEntityType.IfcNamedUnit))
-            ProcessIFCNamedUnit(item);
+         Id = unit.StepId;
+         IfcDerivedUnit derivedUnit = unit as IfcDerivedUnit;
+         if (derivedUnit != null)
+            ProcessIFCDerivedUnit(derivedUnit);
          else
-            Importer.TheLog.LogUnhandledSubTypeError(item, "IfcUnit", true);
+         {
+            IfcMeasureWithUnit measureWithUnit = unit as IfcMeasureWithUnit;
+            if (measureWithUnit != null)
+               ProcessIFCMeasureWithUnit(measureWithUnit);
+            else
+            {
+               IfcMonetaryUnit monetaryUnit = unit as IfcMonetaryUnit;
+               if (monetaryUnit != null)
+                  ProcessIFCMonetaryUnit(monetaryUnit);
+               else
+               {
+                  IfcNamedUnit namedUnit = unit as IfcNamedUnit;
+                  if (namedUnit != null)
+                     ProcessIFCNamedUnit(namedUnit);
+                  else
+                     Importer.TheLog.LogUnhandledSubTypeError(unit as BaseClassIfc, "IfcUnit", true);
+               }
+            }
+         }
       }
 
       /// <summary>
       /// Processes a named unit.
       /// </summary>
       /// <param name="unitHnd">The unit handle.</param>
-      void ProcessIFCNamedUnit(IFCAnyHandle unitHnd)
+      void ProcessIFCNamedUnit(IfcNamedUnit unitHnd)
       {
-         if (IFCAnyHandleUtil.IsSubTypeOf(unitHnd, IFCEntityType.IfcSIUnit))
-            ProcessIFCSIUnit(unitHnd);
-         else if (IFCAnyHandleUtil.IsSubTypeOf(unitHnd, IFCEntityType.IfcConversionBasedUnit))
-            ProcessIFCConversionBasedUnit(unitHnd);
+         IfcSIUnit sIUnit = unitHnd as IfcSIUnit;
+         if (sIUnit != null)
+            ProcessIFCSIUnit(sIUnit);
          else
-            Importer.TheLog.LogUnhandledSubTypeError(unitHnd, IFCEntityType.IfcNamedUnit, true);
+         {
+            IfcConversionBasedUnit conversionBasedUnit = unitHnd as IfcConversionBasedUnit;
+            if(conversionBasedUnit != null)
+               ProcessIFCConversionBasedUnit(conversionBasedUnit);
+            else
+               Importer.TheLog.LogUnhandledSubTypeError(unitHnd, IFCEntityType.IfcNamedUnit, true);
+         }
       }
 
       private void InitPrefixToScaleFactor()
@@ -335,7 +357,7 @@ namespace Revit.IFC.Import.Data
       /// <returns>True if the prefix is supported, false if not.</returns>
       private bool ProcessMetricPrefix(string prefix, UnitType unitType)
       {
-         if (prefix == null)
+         if (string.IsNullOrEmpty(prefix) || string.Compare(prefix, "NONE",true) == 0)
             prefix = "";
 
          IDictionary<string, KeyValuePair<UnitName, UnitSymbolType>> supportedDisplayTypes = GetSupportedDisplayTypes(unitType);
@@ -453,22 +475,19 @@ namespace Revit.IFC.Import.Data
       /// Processes an IfcDerivedUnit.
       /// </summary>
       /// <param name="unitHnd">The unit handle.</param>
-      void ProcessIFCDerivedUnit(IFCAnyHandle unitHnd)
+      void ProcessIFCDerivedUnit(IfcDerivedUnit unitHnd)
       {
-         List<IFCAnyHandle> elements =
-             IFCAnyHandleUtil.GetAggregateInstanceAttribute<List<IFCAnyHandle>>(unitHnd, "Elements");
+         IList<IfcDerivedUnitElement> elements = unitHnd.Elements;
 
          IList<KeyValuePair<IFCUnit, int>> derivedElementUnitHnds = new List<KeyValuePair<IFCUnit, int>>();
-         foreach (IFCAnyHandle subElement in elements)
+         foreach (IfcDerivedUnitElement subElement in elements)
          {
-            IFCAnyHandle derivedElementUnitHnd = IFCImportHandleUtil.GetRequiredInstanceAttribute(subElement, "Unit", false);
-            IFCUnit subUnit = IFCAnyHandleUtil.IsNullOrHasNoValue(derivedElementUnitHnd) ? null : IFCUnit.ProcessIFCUnit(derivedElementUnitHnd);
-            if (subUnit != null)
+            IfcNamedUnit derivedElementUnitHnd = subElement.Unit;
+            if (derivedElementUnitHnd != null)
             {
-               bool found;
-               int exponent = IFCImportHandleUtil.GetRequiredIntegerAttribute(subElement, "Exponent", out found);
-               if (found)
-                  derivedElementUnitHnds.Add(new KeyValuePair<IFCUnit, int>(subUnit, exponent));
+               IFCUnit subUnit = new IFCUnit();
+               subUnit.ProcessIFCNamedUnit(derivedElementUnitHnd);
+               derivedElementUnitHnds.Add(new KeyValuePair<IFCUnit, int>(subUnit, subElement.Exponent));
             }
          }
 
@@ -476,8 +495,8 @@ namespace Revit.IFC.Import.Data
          // The IList allows for possible different interpretations.  For example, Volumetric Flow Rate could be defined by m^3/s (length ^ 3 / time) or L/s (volume / time).
          IList<DerivedUnitExpectedTypes> expectedTypesList = new List<DerivedUnitExpectedTypes>();
 
-         string unitType = IFCAnyHandleUtil.GetEnumerationAttribute(unitHnd, "UnitType");
-         if (string.Compare(unitType, "LINEARVELOCITYUNIT", true) == 0)
+         IfcDerivedUnitEnum unitType = unitHnd.UnitType;
+         if(unitType == IfcDerivedUnitEnum.LINEARVELOCITYUNIT)
          {
             UnitType = UnitType.UT_HVAC_Velocity;
             UnitSystem = UnitSystem.Metric;
@@ -488,7 +507,7 @@ namespace Revit.IFC.Import.Data
             expectedTypes.AddCustomExpectedType(-1, "TIMEUNIT");
             expectedTypesList.Add(expectedTypes);
          }
-         else if (string.Compare(unitType, "THERMALTRANSMITTANCEUNIT", true) == 0)
+         else if (unitType == IfcDerivedUnitEnum.THERMALTRANSMITTANCEUNIT)
          {
             UnitType = UnitType.UT_HVAC_CoefficientOfHeatTransfer;
             UnitSystem = UnitSystem.Metric;
@@ -512,7 +531,7 @@ namespace Revit.IFC.Import.Data
             expectedTypes.AddCustomExpectedType(-3, "TIMEUNIT");
             expectedTypesList.Add(expectedTypes);
          }
-         else if (string.Compare(unitType, "VOLUMETRICFLOWRATEUNIT", true) == 0)
+         else if (unitType == IfcDerivedUnitEnum.VOLUMETRICFLOWRATEUNIT)
          {
             UnitType = UnitType.UT_HVAC_Airflow;
             UnitSystem = UnitSystem.Metric;
@@ -531,7 +550,7 @@ namespace Revit.IFC.Import.Data
             expectedTypes.AddCustomExpectedType(-1, "TIMEUNIT");
             expectedTypesList.Add(expectedTypes);
          }
-         else if (string.Compare(unitType, "MASSDENSITYUNIT", true) == 0)
+         else if (unitType == IfcDerivedUnitEnum.MASSDENSITYUNIT)
          {
             UnitType = UnitType.UT_MassDensity;
             UnitSystem = UnitSystem.Metric;
@@ -544,10 +563,10 @@ namespace Revit.IFC.Import.Data
             expectedTypes.AddExpectedType(-3, UnitType.UT_Length);
             expectedTypesList.Add(expectedTypes);
          }
-         else if (string.Compare(unitType, "USERDEFINED", true) == 0)
+         else if (unitType == IfcDerivedUnitEnum.USERDEFINED)
          {
             // Look at the sub-types to see what we support.
-            string userDefinedType = IFCImportHandleUtil.GetOptionalStringAttribute(unitHnd, "UserDefinedType", null);
+            string userDefinedType = unitHnd.UserDefinedType;
             if (!string.IsNullOrWhiteSpace(userDefinedType))
             {
                if (string.Compare(userDefinedType, "Luminous Efficacy", true) == 0)
@@ -591,143 +610,132 @@ namespace Revit.IFC.Import.Data
             }
          }
 
-         Importer.TheLog.LogUnhandledUnitTypeError(unitHnd, unitType);
+         Importer.TheLog.LogUnhandledUnitTypeError(unitHnd, unitType.ToString());
       }
 
       /// <summary>
       /// Processes an SI unit.
       /// </summary>
       /// <param name="unitHnd">The unit handle.</param>
-      void ProcessIFCSIUnit(IFCAnyHandle unitHnd)
+      void ProcessIFCSIUnit(IfcSIUnit unitHnd)
       {
          UnitSystem = UnitSystem.Metric;
 
-         string unitType = IFCAnyHandleUtil.GetEnumerationAttribute(unitHnd, "UnitType");
-         string unitName = IFCAnyHandleUtil.GetEnumerationAttribute(unitHnd, "Name");
-         string prefix = IFCAnyHandleUtil.GetEnumerationAttribute(unitHnd, "Prefix");
+         IfcUnitEnum unitType = unitHnd.UnitType;
+         IfcSIUnitName unitName = unitHnd.Name;
+         string prefix = unitHnd.Prefix.ToString();
          bool unitNameSupported = true;
 
-         if (string.Compare(unitType, "AREAUNIT", true) == 0)
+         if (unitType == IfcUnitEnum.AREAUNIT)
          {
             UnitType = UnitType.UT_Area;
-            unitNameSupported = (string.Compare(unitName, "SQUARE_METRE", true) == 0) && ProcessMetricPrefix(prefix, UnitType);
+            unitNameSupported = unitName == IfcSIUnitName.SQUARE_METRE && ProcessMetricPrefix(prefix, UnitType);
          }
-         else if (string.Compare(unitType, "ELECTRICCURRENTUNIT", true) == 0)
+         else if (unitType == IfcUnitEnum.ELECTRICCURRENTUNIT)
          {
             UnitType = UnitType.UT_Electrical_Current;
             unitNameSupported = ProcessMetricPrefix(prefix, UnitType);
          }
-         else if (string.Compare(unitType, "ELECTRICVOLTAGEUNIT", true) == 0)
+         else if (unitType == IfcUnitEnum.ELECTRICVOLTAGEUNIT)
          {
             UnitType = UnitType.UT_Electrical_Potential;
             unitNameSupported = ProcessMetricPrefix(prefix, UnitType);
          }
-         else if (string.Compare(unitType, "FORCEUNIT", true) == 0)
+         else if (unitType == IfcUnitEnum.FORCEUNIT)
          {
             UnitType = UnitType.UT_Force;
             unitNameSupported = ProcessMetricPrefix(prefix, UnitType);
          }
-         else if (string.Compare(unitType, "FREQUENCYUNIT", true) == 0)
+         else if (unitType == IfcUnitEnum.FREQUENCYUNIT)
          {
             UnitType = UnitType.UT_Electrical_Frequency;
             unitNameSupported = ProcessMetricPrefix(prefix, UnitType);
          }
-         else if (string.Compare(unitType, "ILLUMINANCEUNIT", true) == 0)
+         else if (unitType == IfcUnitEnum.ILLUMINANCEUNIT)
          {
             UnitType = UnitType.UT_Electrical_Illuminance;
             unitNameSupported = ProcessMetricPrefix(prefix, UnitType);
          }
-         else if (string.Compare(unitType, "LENGTHUNIT", true) == 0)
+         else if (unitType == IfcUnitEnum.LENGTHUNIT)
          {
             UnitType = UnitType.UT_Length;
-            unitNameSupported = (string.Compare(unitName, "METRE", true) == 0) && ProcessMetricPrefix(prefix, UnitType.UT_Length);
+            unitNameSupported = unitName == IfcSIUnitName.METRE && ProcessMetricPrefix(prefix, UnitType.UT_Length);
          }
-         else if (string.Compare(unitType, "LUMINOUSFLUXUNIT", true) == 0)
+         else if (unitType == IfcUnitEnum.LUMINOUSFLUXUNIT)
          {
             UnitType = UnitType.UT_Electrical_Luminous_Flux;
             unitNameSupported = ProcessMetricPrefix(prefix, UnitType);
          }
-         else if (string.Compare(unitType, "LUMINOUSINTENSITYUNIT", true) == 0)
+         else if (unitType == IfcUnitEnum.LUMINOUSINTENSITYUNIT)
          {
             UnitType = UnitType.UT_Electrical_Luminous_Intensity;
             unitNameSupported = ProcessMetricPrefix(prefix, UnitType);
          }
-         else if (string.Compare(unitType, "MASSUNIT", true) == 0)
+         else if (unitType == IfcUnitEnum.MASSUNIT)
          {
             UnitType = UnitType.UT_Mass;
             unitNameSupported = ProcessMetricPrefix(prefix, UnitType);
          }
-         else if (string.Compare(unitType, "PLANEANGLEUNIT", true) == 0)
+         else if (unitType == IfcUnitEnum.PLANEANGLEUNIT)
          {
             UnitType = UnitType.UT_Angle;
             UnitName = UnitName.DUT_RADIANS;
-            unitNameSupported = (string.Compare(unitName, "RADIAN", true) == 0) && (string.IsNullOrWhiteSpace(prefix));
+            unitNameSupported = unitName == IfcSIUnitName.RADIAN && (string.IsNullOrWhiteSpace(prefix));
          }
-         else if (string.Compare(unitType, "POWERUNIT", true) == 0)
+         else if (unitType == IfcUnitEnum.POWERUNIT)
          {
             UnitType = UnitType.UT_HVAC_Power;
             unitNameSupported = ProcessMetricPrefix(prefix, UnitType);
          }
-         else if (string.Compare(unitType, "PRESSUREUNIT", true) == 0)
+         else if (unitType == IfcUnitEnum.PRESSUREUNIT)
          {
             UnitType = UnitType.UT_HVAC_Pressure;
             unitNameSupported = ProcessMetricPrefix(prefix, UnitType);
          }
-         else if (string.Compare(unitType, "SOLIDANGLEUNIT", true) == 0)
+         else if (unitType == IfcUnitEnum.SOLIDANGLEUNIT)
          {
             // Will warn if not steridians.
             UnitType = UnitType.UT_Custom;
-            CustomUnitType = unitType;
-            unitNameSupported = (string.Compare(unitName, "STERADIAN", true) == 0) && (string.IsNullOrWhiteSpace(prefix));
+            CustomUnitType = unitType.ToString();
+            unitNameSupported = unitName == IfcSIUnitName.STERADIAN && (string.IsNullOrWhiteSpace(prefix));
          }
-         else if (string.Compare(unitType, "THERMODYNAMICTEMPERATUREUNIT", true) == 0)
+         else if (unitType == IfcUnitEnum.THERMODYNAMICTEMPERATUREUNIT)
          {
             UnitType = UnitType.UT_HVAC_Temperature;
-            if (string.Compare(unitName, "DEGREE_CELSIUS", true) == 0 ||
-                string.Compare(unitName, "CELSIUS", true) == 0)
+            if (unitName == IfcSIUnitName.DEGREE_CELSIUS)
             {
                UnitName = UnitName.DUT_CELSIUS;
                UnitSymbol = UnitSymbolType.UST_DEGREE_C;
                OffsetFactor = -273.15;
             }
-            else if (string.Compare(unitName, "KELVIN", true) == 0 ||
-                string.Compare(unitName, "DEGREE_KELVIN", true) == 0)
+            else if (unitName == IfcSIUnitName.KELVIN)
             {
                UnitName = UnitName.DUT_KELVIN;
                UnitSymbol = UnitSymbolType.UST_KELVIN;
             }
-            else if (string.Compare(unitName, "FAHRENHEIT", true) == 0 ||
-                string.Compare(unitName, "DEGREE_FAHRENHEIT", true) == 0)
-            {
-               UnitSystem = UnitSystem.Imperial;
-               UnitName = UnitName.DUT_FAHRENHEIT;
-               UnitSymbol = UnitSymbolType.UST_DEGREE_F;
-               ScaleFactor = 5.0 / 9.0;
-               OffsetFactor = (5.0 / 9.0) * 32 - 273.15;
-            }
             else
                unitNameSupported = false;
          }
-         else if (string.Compare(unitType, "TIMEUNIT", true) == 0)
+         else if (unitType == IfcUnitEnum.TIMEUNIT)
          {
             // Will warn if not seconds.
             UnitType = UnitType.UT_Custom;
-            CustomUnitType = unitType;
-            unitNameSupported = (string.Compare(unitName, "SECOND", true) == 0) && (string.IsNullOrWhiteSpace(prefix));
+            CustomUnitType = unitType.ToString();
+            unitNameSupported = unitName == IfcSIUnitName.SECOND && (string.IsNullOrWhiteSpace(prefix));
          }
-         else if (string.Compare(unitType, "VOLUMEUNIT", true) == 0)
+         else if (unitType == IfcUnitEnum.VOLUMEUNIT)
          {
             UnitType = UnitType.UT_Volume;
-            unitNameSupported = (string.Compare(unitName, "CUBIC_METRE", true) == 0) && ProcessMetricPrefix(prefix, UnitType.UT_Volume);
+            unitNameSupported = unitName == IfcSIUnitName.CUBIC_METRE && ProcessMetricPrefix(prefix, UnitType.UT_Volume);
          }
          else
          {
-            Importer.TheLog.LogUnhandledUnitTypeError(unitHnd, unitType);
+            Importer.TheLog.LogUnhandledUnitTypeError(unitHnd, unitType.ToString());
          }
 
-         if (unitName != null && !unitNameSupported)
+         if (!unitNameSupported)
          {
-            if (prefix != null)
+            if (unitHnd.Prefix != IfcSIPrefix.NONE)
                Importer.TheLog.LogError(unitHnd.StepId, "Unhandled type of " + unitType + ": " + prefix + unitName, false);
             else
                Importer.TheLog.LogError(unitHnd.StepId, "Unhandled type of " + unitType + ": " + unitName, false);
@@ -749,25 +757,25 @@ namespace Revit.IFC.Import.Data
       /// Processes measure with unit.
       /// </summary>
       /// <param name="measureUnitHnd">The measure unit handle.</param>
-      void ProcessIFCMeasureWithUnit(IFCAnyHandle measureUnitHnd)
+      void ProcessIFCMeasureWithUnit(IfcMeasureWithUnit measureUnitHnd)
       {
          double baseScale = 0.0;
 
-         IFCData ifcData = measureUnitHnd.GetAttribute("ValueComponent");
-         if (!ifcData.HasValue)
+         IfcValue ifcData = measureUnitHnd.ValueComponent;
+         if (ifcData.Value == null)
             throw new InvalidOperationException("#" + measureUnitHnd.StepId + ": Missing required attribute ValueComponent.");
 
-         if (ifcData.PrimitiveType == IFCDataPrimitiveType.Double)
-            baseScale = ifcData.AsDouble();
-         else if (ifcData.PrimitiveType == IFCDataPrimitiveType.Integer)
-            baseScale = (double)ifcData.AsInteger();
+         if (ifcData.ValueType == typeof(double))
+            baseScale = System.Convert.ToDouble(ifcData.Value);
+         else if (ifcData.ValueType == typeof(int))
+            baseScale = System.Convert.ToDouble(ifcData.Value);
 
          if (MathUtil.IsAlmostZero(baseScale))
             throw new InvalidOperationException("#" + measureUnitHnd.StepId + ": ValueComponent should not be almost zero.");
 
-         IFCAnyHandle unitHnd = IFCImportHandleUtil.GetRequiredInstanceAttribute(measureUnitHnd, "UnitComponent", true);
+         IfcUnit unitHnd = measureUnitHnd.UnitComponent;
 
-         IFCUnit unit = ProcessIFCUnit(unitHnd);
+         IFCUnit unit = new IFCUnit(unitHnd);
          CopyUnit(unit);
          ScaleFactor = unit.ScaleFactor * baseScale;
       }
@@ -776,11 +784,9 @@ namespace Revit.IFC.Import.Data
       /// Processes monetary unit.
       /// </summary>
       /// <param name="monetaryUnitHnd">The monetary unit handle.</param>
-      void ProcessIFCMonetaryUnit(IFCAnyHandle monetaryUnitHnd)
+      void ProcessIFCMonetaryUnit(IfcMonetaryUnit monetaryUnitHnd)
       {
-         string currencyType = (IFCImportFile.TheFile.SchemaVersion < IFCSchemaVersion.IFC4) ?
-            IFCAnyHandleUtil.GetEnumerationAttribute(monetaryUnitHnd, "Currency") :
-            IFCImportHandleUtil.GetOptionalStringAttribute(monetaryUnitHnd, "Currency", string.Empty);
+         string currencyType = monetaryUnitHnd.Currency;
 
          UnitType = UnitType.UT_Currency;
          UnitName = UnitName.DUT_CURRENCY;
@@ -822,24 +828,25 @@ namespace Revit.IFC.Import.Data
       /// Processes a conversion based unit.
       /// </summary>
       /// <param name="convUnitHnd">The unit handle.</param>
-      void ProcessIFCConversionBasedUnit(IFCAnyHandle convUnitHnd)
+      void ProcessIFCConversionBasedUnit(IfcConversionBasedUnit convUnitHnd)
       {
-         IFCAnyHandle measureWithUnitHnd = IFCAnyHandleUtil.GetInstanceAttribute(convUnitHnd, "ConversionFactor");
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(measureWithUnitHnd))
+         IfcMeasureWithUnit measureWithUnitHnd = convUnitHnd.ConversionFactor;
+         if (measureWithUnitHnd == null)
             throw new InvalidOperationException("#" + convUnitHnd.StepId + ": Missing required attribute ConversionFactor.");
 
-         IFCUnit measureWithUnit = IFCUnit.ProcessIFCUnit(measureWithUnitHnd);
+         IFCUnit measureWithUnit = new IFCUnit();
+         measureWithUnit.ProcessIFCMeasureWithUnit(measureWithUnitHnd);
          if (measureWithUnit == null)
             throw new InvalidOperationException("#" + convUnitHnd.StepId + ": Invalid base ConversionFactor, aborting.");
 
          CopyUnit(measureWithUnit);
 
          // For some common cases, get the units correct.
-         string unitType = IFCAnyHandleUtil.GetEnumerationAttribute(convUnitHnd, "UnitType");
-         if (string.Compare(unitType, "LENGTHUNIT", true) == 0)
+         IfcUnitEnum unitType = convUnitHnd.UnitType;
+         string name = convUnitHnd.Name;
+         if (unitType == IfcUnitEnum.LENGTHUNIT)
          {
             UnitType = UnitType.UT_Length;
-            string name = IFCAnyHandleUtil.GetStringAttribute(convUnitHnd, "Name");
 
             if (string.Compare(name, "FOOT", true) == 0 ||
                string.Compare(name, "FEET", true) == 0)
@@ -856,10 +863,9 @@ namespace Revit.IFC.Import.Data
                UnitSymbol = UnitSymbolType.UST_NONE;
             }
          }
-         else if (string.Compare(unitType, "PLANEANGLEUNIT", true) == 0)
+         else if (unitType == IfcUnitEnum.PLANEANGLEUNIT)
          {
             UnitType = UnitType.UT_Angle;
-            string name = IFCAnyHandleUtil.GetStringAttribute(convUnitHnd, "Name");
 
             if (string.Compare(name, "GRAD", true) == 0 ||
                string.Compare(name, "GRADIAN", true) == 0 ||
@@ -878,10 +884,9 @@ namespace Revit.IFC.Import.Data
                UnitSymbol = UnitSymbolType.UST_DEGREE_SYMBOL;
             }
          }
-         else if (string.Compare(unitType, "AREAUNIT", true) == 0)
+         else if (unitType == IfcUnitEnum.AREAUNIT)
          {
             UnitType = UnitType.UT_Area;
-            string name = IFCAnyHandleUtil.GetStringAttribute(convUnitHnd, "Name");
 
             if (string.Compare(name, "SQUARE FOOT", true) == 0 ||
                string.Compare(name, "SQUARE_FOOT", true) == 0 ||
@@ -893,10 +898,9 @@ namespace Revit.IFC.Import.Data
                UnitSymbol = UnitSymbolType.UST_FT_SUP_2;
             }
          }
-         else if (string.Compare(unitType, "VOLUMEUNIT", true) == 0)
+         else if (unitType == IfcUnitEnum.VOLUMEUNIT)
          {
             UnitType = UnitType.UT_Volume;
-            string name = IFCAnyHandleUtil.GetStringAttribute(convUnitHnd, "Name");
 
             if (string.Compare(name, "CUBIC FOOT", true) == 0 ||
                string.Compare(name, "CUBIC_FOOT", true) == 0 ||
@@ -908,10 +912,9 @@ namespace Revit.IFC.Import.Data
                UnitSymbol = UnitSymbolType.UST_FT_SUP_3;
             }
          }
-         else if (string.Compare(unitType, "THERMODYNAMICMEASUREUNIT", true) == 0)
+         else if (unitType == IfcUnitEnum.THERMODYNAMICTEMPERATUREUNIT)
          {
             UnitType = UnitType.UT_HVAC_Temperature;
-            string name = IFCAnyHandleUtil.GetStringAttribute(convUnitHnd, "Name");
 
             if ((string.Compare(name, "F", true) == 0) ||
                (string.Compare(name, "FAHRENHEIT", true) == 0))
@@ -928,34 +931,6 @@ namespace Revit.IFC.Import.Data
                UnitSymbol = UnitSymbolType.UST_DEGREE_R;
             }
          }
-      }
-
-      /// <summary>
-      /// Processes a unit.
-      /// </summary>
-      /// <param name="unitHnd">The unit handle.</param>
-      /// <returns>The Unit object.</returns>
-      public static IFCUnit ProcessIFCUnit(IFCAnyHandle unitHnd)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(unitHnd))
-         {
-            //LOG: ERROR: IfcUnit is null or has no value.
-            return null;
-         }
-
-         try
-         {
-            IFCEntity ifcUnit;
-            if (!IFCImportFile.TheFile.EntityMap.TryGetValue(unitHnd.StepId, out ifcUnit))
-               ifcUnit = new IFCUnit(unitHnd);
-            return (ifcUnit as IFCUnit);
-         }
-         catch (InvalidOperationException ex)
-         {
-            Importer.TheLog.LogError(unitHnd.StepId, ex.Message, false);
-         }
-
-         return null;
       }
 
       /// <summary>

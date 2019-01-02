@@ -29,6 +29,8 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 using TemporaryVerboseLogging = Revit.IFC.Import.Utility.IFCImportOptions.TemporaryVerboseLogging;
 
 namespace Revit.IFC.Import.Data
@@ -36,74 +38,32 @@ namespace Revit.IFC.Import.Data
    /// <summary>
    /// Class that represents IFCCompositeCurve entity
    /// </summary>
-   public class IFCCompositeCurve : IFCBoundedCurve
+   public static class IFCCompositeCurve 
    {
-      private IList<IFCCurve> m_Segments = null;
-
-      /// <summary>
-      /// The list of curve segments for this IfcCompositeCurve.
-      /// </summary>
-      public IList<IFCCurve> Segments
+      public static Curve CompositeCurve(this IfcCompositeCurve compositeCurve)
       {
-         get
-         {
-            if (m_Segments == null)
-               m_Segments = new List<IFCCurve>();
-            return m_Segments;
-         }
-      }
-
-      protected IFCCompositeCurve()
-      {
-      }
-
-      protected IFCCompositeCurve(IFCAnyHandle compositeCurve)
-      {
-         Process(compositeCurve);
-      }
-
-      protected override void Process(IFCAnyHandle ifcCurve)
-      {
-         base.Process(ifcCurve);
-
          // We are going to attempt minor repairs for small but reasonable gaps between Line/Line and Line/Arc pairs.  As such, we want to collect the
          // curves before we create the curve loop.
 
-         IList<IFCAnyHandle> segments = IFCAnyHandleUtil.GetAggregateInstanceAttribute<List<IFCAnyHandle>>(ifcCurve, "Segments");
+         IList<IfcCompositeCurveSegment> segments = compositeCurve.Segments;
          if (segments == null)
-            Importer.TheLog.LogError(Id, "Invalid IfcCompositeCurve with no segments.", true);
+            Importer.TheLog.LogError(compositeCurve.StepId, "Invalid IfcCompositeCurve with no segments.", true);
 
          // need List<> so that we can AddRange later.
          List<Curve> curveSegments = new List<Curve>();
-         Segments.Clear();
 
-         foreach (IFCAnyHandle segment in segments)
+         foreach (IfcCompositeCurveSegment segment in segments)
          {
-            IFCCurve currCurve = ProcessIFCCompositeCurveSegment(segment);
-
-            if (currCurve != null)
-            {
-               Segments.Add(currCurve);
-
-               if (currCurve.Curve != null)
-               {
-                  curveSegments.Add(currCurve.Curve);
-               }
-               else if (currCurve.CurveLoop != null)
-               {
-                  foreach (Curve subCurve in currCurve.CurveLoop)
-                  {
-                     if (subCurve != null)
-                        curveSegments.Add(subCurve);
-                  }
-               }
-            }
+            IList<Curve> curves = segment.getSegmentCurves();
+            if (curves != null)
+               curveSegments.AddRange(curves);
          }
 
          int numSegments = curveSegments.Count;
          if (numSegments == 0)
-            Importer.TheLog.LogError(Id, "Invalid IfcCompositeCurve with no segments.", true);
+            Importer.TheLog.LogError(compositeCurve.StepId, "Invalid IfcCompositeCurve with no segments.", true);
 
+         CurveLoop curveLoop = new CurveLoop();
          try
          {
             // We are going to try to reverse or tweak segments as necessary to make the CurveLoop.
@@ -217,15 +177,15 @@ namespace Revit.IFC.Import.Data
                   XYZ originalCurveLoopEndPoint = curveLoopEndPoint;
                   curveLoopEndPoint = nextEndPoint;
                   if (canRepairNext)
-                     curveSegments[ii] = RepairLineAndReport(Id, originalCurveLoopEndPoint, curveLoopEndPoint, minGap);
+                     curveSegments[ii] = RepairLineAndReport(compositeCurve.StepId, originalCurveLoopEndPoint, curveLoopEndPoint, minGap);
                   else if (curveSegments[ii - 1] is Line)  // = canRepairCurrent, only used here.
-                     curveSegments[ii - 1] = RepairLineAndReport(Id, curveSegments[ii - 1].GetEndPoint(0), curveSegments[ii].GetEndPoint(0), minGap);
+                     curveSegments[ii - 1] = RepairLineAndReport(compositeCurve.StepId, curveSegments[ii - 1].GetEndPoint(0), curveSegments[ii].GetEndPoint(0), minGap);
                   else
                   {
                      // Can't add a line to fix a gap that is smaller than the short curve tolerance.
                      // In the future, we may fix this gap by intersecting the two curves and extending one of them.
                      if (minGap < shortCurveTol + MathUtil.Eps())
-                        Importer.TheLog.LogError(Id, "IfcCompositeCurve contains a gap between two non-linear segments that is too short to be repaired by a connecting segment.", true);
+                        Importer.TheLog.LogError(compositeCurve.StepId, "IfcCompositeCurve contains a gap between two non-linear segments that is too short to be repaired by a connecting segment.", true);
 
                      try
                      {
@@ -237,7 +197,7 @@ namespace Revit.IFC.Import.Data
                      }
                      catch
                      {
-                        Importer.TheLog.LogError(Id, "IfcCompositeCurve contains a gap between two non-linear segments that can't be fixed.", true);
+                        Importer.TheLog.LogError(compositeCurve.StepId, "IfcCompositeCurve contains a gap between two non-linear segments that can't be fixed.", true);
                      }
                   }
                }
@@ -248,16 +208,16 @@ namespace Revit.IFC.Import.Data
 
                   if (canRepairNext)
                   {
-                     curveSegments[ii] = RepairLineAndReport(Id, curveLoopStartPoint, originalCurveLoopStartPoint, minGap);
+                     curveSegments[ii] = RepairLineAndReport(compositeCurve.StepId, curveLoopStartPoint, originalCurveLoopStartPoint, minGap);
                   }
                   else if (canRepairFirst)
-                     curveSegments[0] = RepairLineAndReport(Id, curveSegments[ii].GetEndPoint(1), curveSegments[0].GetEndPoint(1), minGap);
+                     curveSegments[0] = RepairLineAndReport(compositeCurve.StepId, curveSegments[ii].GetEndPoint(1), curveSegments[0].GetEndPoint(1), minGap);
                   else
                   {
                      // Can't add a line to fix a gap that is smaller than the short curve tolerance.
                      // In the future, we may fix this gap by intersecting the two curves and extending one of them.
                      if (minGap < shortCurveTol + MathUtil.Eps())
-                        Importer.TheLog.LogError(Id, "IfcCompositeCurve contains a gap between two non-linear segments that is too short to be repaired by a connecting segment.", true);
+                        Importer.TheLog.LogError(compositeCurve.StepId, "IfcCompositeCurve contains a gap between two non-linear segments that is too short to be repaired by a connecting segment.", true);
 
                      Line repairLine = Line.CreateBound(curveSegments[ii].GetEndPoint(1), originalCurveLoopStartPoint);
                      curveSegments.Insert(0, repairLine);
@@ -269,7 +229,7 @@ namespace Revit.IFC.Import.Data
                   // or we added a short repair line to the front of the loop.  In any of these cases, the front curve segement of the
                   // loop is now a line segment.
                   if (!canRepairFirst && !canRepairNext && !createdRepairLine)
-                     Importer.TheLog.LogError(Id, "IfcCompositeCurve contains a gap between two non-linear segments that can't be fixed.", true);
+                     Importer.TheLog.LogError(compositeCurve.StepId, "IfcCompositeCurve contains a gap between two non-linear segments that can't be fixed.", true);
 
                   canRepairFirst = true;
 
@@ -280,78 +240,51 @@ namespace Revit.IFC.Import.Data
                }
             }
 
-            if (CurveLoop == null)
-               CurveLoop = new CurveLoop();
 
             foreach (Curve curveSegment in curveSegments)
             {
                if (curveSegment != null)
-                  CurveLoop.Append(curveSegment);
+                  curveLoop.Append(curveSegment);
             }
          }
          catch (Exception ex)
          {
-            Importer.TheLog.LogError(Id, ex.Message, true);
+            Importer.TheLog.LogError(compositeCurve.StepId, ex.Message, true);
          }
 
          // Try to create the curve representation of this IfcCompositeCurve
-         Curve = ConvertCurveLoopIntoSingleCurve(CurveLoop);
+         return ConvertCurveLoopIntoSingleCurve(curveLoop);
       }
 
-      /// <summary>
-      /// Create an IFCCompositeCurve object from a handle of type IfcCompositeCurve
-      /// </summary>
-      /// <param name="ifcCompositeCurve">The IFC handle</param>
-      /// <returns>The IFCCompositeCurve object</returns>
-      public static IFCCompositeCurve ProcessIFCCompositeCurve(IFCAnyHandle ifcCompositeCurve)
+
+
+      internal static IList<Curve> getSegmentCurves(this IfcCompositeCurveSegment curveSegment)
       {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcCompositeCurve))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcCompositeCurve);
-            return null;
-         }
 
-         IFCEntity compositeCurve = null;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcCompositeCurve.StepId, out compositeCurve))
-            compositeCurve = new IFCCompositeCurve(ifcCompositeCurve);
-
-         return (compositeCurve as IFCCompositeCurve);
-      }
-
-      private IFCCurve ProcessIFCCompositeCurveSegment(IFCAnyHandle ifcCurveSegment)
-      {
-         bool found = false;
-
-         bool sameSense = IFCImportHandleUtil.GetRequiredBooleanAttribute(ifcCurveSegment, "SameSense", out found);
-         if (!found)
-            sameSense = true;
-
-         IFCAnyHandle ifcParentCurve = IFCImportHandleUtil.GetRequiredInstanceAttribute(ifcCurveSegment, "ParentCurve", true);
-         IFCCurve parentCurve = null;
-
-         using (TemporaryVerboseLogging logger = new TemporaryVerboseLogging())
-         {
-            parentCurve = IFCCurve.ProcessIFCCurve(ifcParentCurve);
-         }
+         IfcCurve parentCurve = curveSegment.ParentCurve;
 
          if (parentCurve == null)
          {
-            Importer.TheLog.LogWarning(ifcCurveSegment.StepId, "Error processing ParentCurve (#" + ifcParentCurve.StepId + ") for IfcCompositeCurveSegment; this may be repairable.", false);
+            Importer.TheLog.LogWarning(curveSegment.StepId, "Error processing ParentCurve for IfcCompositeCurveSegment; this may be repairable.", false);
             return null;
          }
 
-         bool hasCurve = (parentCurve.Curve != null);
-         bool hasCurveLoop = (parentCurve.CurveLoop != null);
-         if (!hasCurve && !hasCurveLoop)
+         Curve curve = parentCurve.Curve();
+         if (curve != null)
+            return new List<Curve>() { curve };
+      
+         CurveLoop curveLoop = parentCurve.CurveLoop();
+         if (curveLoop != null)
          {
-            Importer.TheLog.LogWarning(ifcCurveSegment.StepId, "Error processing ParentCurve (#" + ifcParentCurve.StepId + ") for IfcCompositeCurveSegment; this may be repairable.", false);
-            return null;
+            List<Curve> segments = new List<Curve>();
+            segments.AddRange(curveLoop);
+            return segments;
          }
-
-         return parentCurve;
+         Importer.TheLog.LogWarning(curveSegment.StepId, "Error processing ParentCurve (#" + parentCurve.StepId + ") for IfcCompositeCurveSegment; this may be repairable.", false);
+         return null;
       }
 
-      private Line RepairLineAndReport(int id, XYZ startPoint, XYZ endPoint, double gap)
+      private static Line RepairLineAndReport(int id, XYZ startPoint, XYZ endPoint, double gap)
       {
          string gapAsString = IFCUnitUtil.FormatLengthAsString(gap);
          Importer.TheLog.LogWarning(id, "Repaired gap of size " + gapAsString + " in IfcCompositeCurve.", false);
@@ -363,7 +296,7 @@ namespace Revit.IFC.Import.Data
       /// </summary>
       /// <param name="curveLoop">The curveloop</param>
       /// <returns>A Revit curve that is made by appending every curve in the given curveloop, if possible</returns>
-      private Curve ConvertCurveLoopIntoSingleCurve(CurveLoop curveLoop)
+      private static Curve ConvertCurveLoopIntoSingleCurve(CurveLoop curveLoop)
       {
          if (curveLoop == null)
          {

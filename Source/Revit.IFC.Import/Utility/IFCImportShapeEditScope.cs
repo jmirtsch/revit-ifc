@@ -31,6 +31,8 @@ using UnitSystem = Autodesk.Revit.DB.DisplayUnit;
 using UnitName = Autodesk.Revit.DB.DisplayUnitType;
 using Revit.IFC.Import.Enums;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Utility
 {
    /// <summary>
@@ -40,9 +42,9 @@ namespace Revit.IFC.Import.Utility
    {
       private Document m_Document = null;
 
-      private IFCProduct m_Creator = null;
+      private IfcObjectDefinition m_Creator = null;
 
-      private IFCRepresentation m_ContainingRepresentation = null;
+      private IfcRepresentation m_ContainingRepresentation = null;
 
       private ElementId m_GraphicsStyleId = ElementId.InvalidElementId;
 
@@ -89,6 +91,9 @@ namespace Revit.IFC.Import.Utility
             return m_MaterialIdList;
          }
       }
+
+      public List<IFCSolidInfo> Solids { get; } = new List<IFCSolidInfo>();
+      public List<Curve> FootPrintCurves { get; } = new List<Curve>();
 
       private IFCShapeBuilderType m_BuilderType = IFCShapeBuilderType.Unknown;
 
@@ -161,14 +166,14 @@ namespace Revit.IFC.Import.Utility
       public class IFCContainingRepresentationSetter : IDisposable
       {
          private IFCImportShapeEditScope m_Scope = null;
-         private IFCRepresentation m_OldRepresentation = null;
+         private IfcRepresentation m_OldRepresentation = null;
 
          /// <summary>
          /// The constructor.
          /// </summary>
          /// <param name="scope">The associated shape edit scope.</param>
          /// <param name="item">The current styled item.</param>
-         public IFCContainingRepresentationSetter(IFCImportShapeEditScope scope, IFCRepresentation containingRepresentation)
+         public IFCContainingRepresentationSetter(IFCImportShapeEditScope scope, IfcRepresentation containingRepresentation)
          {
             if (scope != null)
             {
@@ -202,13 +207,13 @@ namespace Revit.IFC.Import.Utility
          /// </summary>
          /// <param name="scope">The associated shape edit scope.</param>
          /// <param name="item">The current styled item.</param>
-         public IFCMaterialStack(IFCImportShapeEditScope scope, IFCStyledItem styledItem, IFCPresentationLayerAssignment layerAssignment)
+         public IFCMaterialStack(IFCImportShapeEditScope scope, CreateElementIfcCache cache, IfcStyledItem styledItem, IfcPresentationLayerAssignment layerAssignment)
          {
             m_Scope = scope;
             if (styledItem != null)
-               m_MaterialElementId = styledItem.GetMaterialElementId(scope);
+               m_MaterialElementId = styledItem.GetMaterialElementId(cache, scope);
             else if (layerAssignment != null)
-               m_MaterialElementId = layerAssignment.GetMaterialElementId(scope);
+               m_MaterialElementId = layerAssignment.GetMaterialElementId(cache, scope);
 
             if (m_MaterialElementId != ElementId.InvalidElementId)
                m_Scope.PushMaterialId(m_MaterialElementId);
@@ -250,7 +255,7 @@ namespace Revit.IFC.Import.Utility
       /// <summary>
       /// Get the top-level IFC entity associated with this shape.
       /// </summary>
-      public IFCProduct Creator
+      public IfcObjectDefinition Creator
       {
          get { return m_Creator; }
          protected set { m_Creator = value; }
@@ -259,7 +264,7 @@ namespace Revit.IFC.Import.Utility
       /// <summary>
       /// The IFCRepresentation that contains the currently processed IFC entity.
       /// </summary>
-      public IFCRepresentation ContainingRepresentation
+      public IfcRepresentation ContainingRepresentation
       {
          get { return m_ContainingRepresentation; }
          protected set { m_ContainingRepresentation = value; }
@@ -270,7 +275,7 @@ namespace Revit.IFC.Import.Utility
 
       }
 
-      protected IFCImportShapeEditScope(Document doc, IFCProduct creator)
+      protected IFCImportShapeEditScope(Document doc, IfcObjectDefinition creator)
       {
          Document = doc;
          Creator = creator;
@@ -285,7 +290,7 @@ namespace Revit.IFC.Import.Utility
       /// <param name="action">The name of the current action.</param>
       /// <param name="creator">The entity being processed.</param>
       /// <returns>The new edit scope.</returns>
-      static public IFCImportShapeEditScope Create(Document doc, IFCProduct creator)
+      static public IFCImportShapeEditScope Create(Document doc, IfcObjectDefinition creator)
       {
          return new IFCImportShapeEditScope(doc, creator);
       }
@@ -296,7 +301,7 @@ namespace Revit.IFC.Import.Utility
       public int CreatorId()
       {
          if (Creator != null)
-            return Creator.Id;
+            return Creator.StepId;
          return -1;
       }
 
@@ -308,7 +313,10 @@ namespace Revit.IFC.Import.Utility
       {
          if (ContainingRepresentation == null)
             return IFCRepresentationIdentifier.Unhandled;
-         return ContainingRepresentation.Identifier;
+         IFCRepresentationIdentifier representationIdentifier = IFCRepresentationIdentifier.Unhandled;
+         if (Enum.TryParse<IFCRepresentationIdentifier>(ContainingRepresentation.RepresentationIdentifier, out representationIdentifier))
+            return representationIdentifier;
+         return IFCRepresentationIdentifier.Unhandled; 
       }
 
       // End temporary classes for holding BRep information.
@@ -318,31 +326,6 @@ namespace Revit.IFC.Import.Utility
          // sphere of equivalence.  In the case of AnyGeoemtry, we resort to the Solid tolerance as we are
          // generally trying to create Solids over Meshes.
          IFCFuzzyXYZ.IFCFuzzyXYZEpsilon = IFCImportFile.TheFile.Document.Application.ShortCurveTolerance;
-      }
-
-      /// <summary>
-      /// Add a Solid to the current DirectShape element.
-      /// </summary>
-      /// <param name="solidInfo">The IFCSolidInfo class describing the solid.</param>
-      public void AddGeometry(IFCSolidInfo solidInfo)
-      {
-         if (solidInfo == null || solidInfo.GeometryObject == null)
-            return;
-
-         solidInfo.RepresentationType = GetContainingRepresentationType();
-         Creator.Solids.Add(solidInfo);
-      }
-
-      /// <summary>
-      /// Add a curve to the Footprint reprensentation of the object in scope.
-      /// </summary>
-      /// <param name="curve">The curve.</param>
-      public void AddFootprintCurve(Curve curve)
-      {
-         if (curve == null)
-            return;
-
-         Creator.FootprintCurves.Add(curve);
       }
 
       /// <summary>
@@ -388,7 +371,11 @@ namespace Revit.IFC.Import.Utility
       /// <param name="curves">The list of curves, to be validated.</param>
       /// <param name="id">The id of the object being created, for error logging.</param>
       /// <returns>True if any curves were added to the plan view representation.</returns>
-      public bool AddPlanViewCurves(IList<Curve> curves, int id)
+      public bool AddPlaneViewCurves(int id)
+      {
+         return AddPlaneViewCurves(FootPrintCurves, id);
+      }
+      public bool AddPlaneViewCurves(IList<Curve> curves, int id)
       {
          m_ViewShapeBuilder = null;
          int numCurves = curves.Count;

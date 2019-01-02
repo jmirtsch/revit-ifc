@@ -1732,15 +1732,6 @@ namespace Revit.IFC.Import.Enums
       Area
    }
 
-   /// <summary>
-   /// Defines the boolean operators used in clipping.
-   /// </summary>
-   public enum IFCBooleanOperator
-   {
-      Union,
-      Intersection,
-      Difference
-   }
 
    /// <summary>
    /// Defines the transition type used by compositive curve segments.

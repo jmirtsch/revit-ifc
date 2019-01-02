@@ -29,41 +29,28 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
-   public class IFCSurfaceOfLinearExtrusion : IFCSweptSurface
+   public static class IFCSurfaceOfLinearExtrusion
    {
-      XYZ m_ExtrudedDirection = null;
-
-      double m_Depth = 0.0;
-
-      public XYZ ExtrudedDirection
-      {
-         get { return m_ExtrudedDirection; }
-         protected set { m_ExtrudedDirection = value; }
-      }
-
-      public double Depth
-      {
-         get { return m_Depth; }
-         protected set { m_Depth = value; }
-      }
-
       /// <summary>
       /// Get the local surface transform at a given point on the surface.
       /// </summary>
       /// <param name="pointOnSurface">The point.</param>
       /// <returns>The transform.</returns>
       /// <remarks>This does not include the translation component.</remarks>
-      public override Transform GetTransformAtPoint(XYZ pointOnSurface)
+      public static Transform GetTransformAtPoint(this IfcSurfaceOfLinearExtrusion surfaceOfLinearExtrusion, XYZ pointOnSurface, CreateElementIfcCache cache)
       {
-         if (!(SweptCurve is IFCSimpleProfile))
+         IFCSimpleProfile simpleProfile = IFCSimpleProfile.CreateIFCSimpleProfile(surfaceOfLinearExtrusion.SweptCurve, cache);
+         if (simpleProfile == null)
          {
             // LOG: ERROR: warn that we only support simple profiles.
             return null;
          }
 
-         CurveLoop outerCurveLoop = (SweptCurve as IFCSimpleProfile).OuterCurve;
+         CurveLoop outerCurveLoop = simpleProfile.OuterCurve;
          if (outerCurveLoop == null || outerCurveLoop.Count() != 1)
          {
             // LOG: ERROR
@@ -94,59 +81,17 @@ namespace Revit.IFC.Import.Data
 
          return atPoint;
       }
-
-      protected IFCSurfaceOfLinearExtrusion()
-      {
-      }
-
-      override protected void Process(IFCAnyHandle ifcSurface)
-      {
-         base.Process(ifcSurface);
-
-         IFCAnyHandle extrudedDirection = IFCImportHandleUtil.GetRequiredInstanceAttribute(ifcSurface, "ExtrudedDirection", true);
-         ExtrudedDirection = IFCPoint.ProcessNormalizedIFCDirection(extrudedDirection);
-
-         bool found = false;
-         Depth = IFCImportHandleUtil.GetRequiredScaledLengthAttribute(ifcSurface, "Depth", out found);
-         if (!found)
-            Importer.TheLog.LogError(Id, "IfcSurfaceOfLinearExtrusion has no height, ignoring.", true);
-      }
-
-      protected IFCSurfaceOfLinearExtrusion(IFCAnyHandle surfaceOfLinearExtrusion)
-      {
-         Process(surfaceOfLinearExtrusion);
-      }
-
-      /// <summary>
-      /// Create an IFCSurfaceOfLinearExtrusion object from a handle of type IfcSurfaceOfLinearExtrusion.
-      /// </summary>
-      /// <param name="ifcSurfaceOfLinearExtrusion">The IFC handle.</param>
-      /// <returns>The IFCSurfaceOfLinearExtrusion object.</returns>
-      public static IFCSurfaceOfLinearExtrusion ProcessIFCSurfaceOfLinearExtrusion(IFCAnyHandle ifcSurfaceOfLinearExtrusion)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcSurfaceOfLinearExtrusion))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcSurfaceOfLinearExtrusion);
-            return null;
-         }
-
-         IFCEntity surfaceOfLinearExtrusion;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcSurfaceOfLinearExtrusion.StepId, out surfaceOfLinearExtrusion))
-            surfaceOfLinearExtrusion = new IFCSurfaceOfLinearExtrusion(ifcSurfaceOfLinearExtrusion);
-
-         return (surfaceOfLinearExtrusion as IFCSurfaceOfLinearExtrusion);
-      }
-
       /// <summary>
       /// Returns the surface which defines the internal shape of the face
       /// </summary>
       /// <param name="lcs">The local coordinate system for the surface.  Can be null.</param>
       /// <returns>The surface which defines the internal shape of the face</returns>
-      public override Surface GetSurface(Transform lcs)
+      public static Surface GetSurface(this IfcSurfaceOfLinearExtrusion surfaceOfLinearExtrusion, Transform lcs, CreateElementIfcCache cache)
       {
          Curve sweptCurve = null;
+         IFCSimpleProfile simpleProfile = IFCSimpleProfile.CreateIFCSimpleProfile(surfaceOfLinearExtrusion.SweptCurve, cache);
          // Get the RuledSurface which is used to create the geometry from the brepbuilder
-         if (!(SweptCurve is IFCSimpleProfile))
+         if (simpleProfile == null)
          {
             return null;
          }
@@ -155,8 +100,7 @@ namespace Revit.IFC.Import.Data
             // Currently there is no easy way to get the curve from the IFCProfile, so for now we assume that
             // the SweptCurve is an IFCSimpleProfile and its outer curve only contains one curve, which is the 
             // profile curve that we want
-            IFCSimpleProfile simpleSweptCurve = SweptCurve as IFCSimpleProfile;
-            CurveLoop outerCurve = simpleSweptCurve.OuterCurve;
+            CurveLoop outerCurve = simpleProfile.OuterCurve;
             if (outerCurve == null)
             {
                return null;
@@ -164,8 +108,9 @@ namespace Revit.IFC.Import.Data
             CurveLoopIterator it = outerCurve.GetCurveLoopIterator();
             sweptCurve = it.Current;
          }
+
          // Create the second profile curve by translating the first one in the extrusion direction
-         Curve profileCurve2 = sweptCurve.CreateTransformed(Transform.CreateTranslation(ExtrudedDirection.Multiply(Depth)));
+         Curve profileCurve2 = sweptCurve.CreateTransformed(Transform.CreateTranslation(surfaceOfLinearExtrusion.ExtrudedDirection.ProcessNormalizedIFCDirection().Multiply(IFCUnitUtil.ScaleLength(surfaceOfLinearExtrusion.Depth))));
 
          if (lcs == null)
             return RuledSurface.Create(sweptCurve, profileCurve2);

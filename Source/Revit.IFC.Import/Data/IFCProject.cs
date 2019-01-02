@@ -27,198 +27,95 @@ using Revit.IFC.Common.Utility;
 using Revit.IFC.Common.Enums;
 using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Utility;
+using Revit.IFC.Import.Geometry;
+
+using GeometryGym.Ifc;
 
 namespace Revit.IFC.Import.Data
 {
-   /// <summary>
-   /// Represents an IfcProject.
-   /// </summary>
-   /// <remarks>In IFC4, IfcProject inherits from IfcContext, which in turn inherits from IfcObjectDefinition.
-   /// In IFC2x3, IfcProject inherits from IfcObject, which in turn inherits from IfcObjectDefintion.
-   /// In addition, in IFC4, all of the IfcProject specific attributes are at the IfcContext level.
-   /// For now, we will:
-   /// 1. Keep IfcProject inheriting from IfcObject, and make IfcObject aware that some attributes are not appropriate for IfcProject.
-   /// 2. Keep IfcContext attributes at the IfcProject level.
-   /// Note also that "LongName" and "Phase" are not yet supported, and that the content of "RepresentationContexts" is stored directly
-   /// in IfcProject.</remarks>
-   public class IFCProject : IFCObject
+   public class ProjectAggregate
    {
-      private UV m_TrueNorthDirection = null;
+      internal Transform WorldCoordinateSystem { get; set; } = Transform.Identity;
 
-      private Transform m_WorldCoordinateSystem = null;
+      internal Dictionary<int, IfcProduct> Elements { get; } = new Dictionary<int, IfcProduct>();
+      internal List<IfcGrid> Grids = new List<IfcGrid>();
+      internal Dictionary<string, IfcGridAxis> GridAxes { get; } = new Dictionary<string, IfcGridAxis>();
+      internal List<IfcBuildingStorey> Stories { get; } = new List<IfcBuildingStorey>();
+      internal List<IfcSpace> Spaces { get; } = new List<IfcSpace>();
+      internal List<IfcSystem> Systems { get; } = new List<IfcSystem>();
+      internal List<IfcZone> Zones { get; } = new List<IfcZone>();
 
-      private ISet<IFCUnit> m_UnitsInContext = null;
+      internal IFCUnits UnitsInContext { get; } = new IFCUnits();
+      public IfcProject Project { get; private set; } = null;
 
-      private IDictionary<string, IFCGridAxis> m_GridAxes = null;
+      private CreateElementIfcCache m_Cache = null;
 
-      /// <summary>
-      /// The true north direction of the project.
-      /// </summary>
-      public UV TrueNorthDirection
+      
+      // This is true if all of the contained entities inside of IfcSite have the local placement relative to the IfcSite's.
+      // If this is set to true, we can move the project closer to the origin and set the project location; otherwise we can't do that easily.
+
+      public ProjectAggregate(IfcProject project, Document document)
       {
-         get { return m_TrueNorthDirection; }
-         protected set { m_TrueNorthDirection = value; }
-      }
+         Project = project;
+         m_Cache = new CreateElementIfcCache(document);
+         Initialize();
 
-      /// <summary>
-      /// The true north direction of the project.
-      /// </summary>
-      /// <remarks>Strictly speaking, the WCS is associated with a GeometricRepresentationContext,
-      /// and each individual geometry may point to a different one.  In practice, however, we only have
-      /// one, a Model one, and it is generally the identity transform, with or without an offset.
-      /// The reason we only want to apply this once, at a top level, is that we can get into trouble
-      /// with mapped representations - if the representation containing the mapped item and the
-      /// representation map both apply the WCS, the object may be transformed twice.</remarks>
-      public Transform WorldCoordinateSystem
-      {
-         get { return m_WorldCoordinateSystem; }
-         protected set { m_WorldCoordinateSystem = value; }
-      }
-
-      /// <summary>
-      /// The units in the project.
-      /// </summary>
-      public ISet<IFCUnit> UnitsInContext
-      {
-         get { return m_UnitsInContext; }
-      }
-
-      /// <summary>
-      /// Constructs an IFCProject from the IfcProject handle.
-      /// </summary>
-      /// <param name="ifcProject">The IfcProject handle.</param>
-      protected IFCProject(IFCAnyHandle ifcProject)
-      {
-         IFCImportFile.TheFile.IFCProject = this;
-         Process(ifcProject);
-      }
-
-      /// <summary>
-      /// Returns true if sub-elements should be grouped; false otherwise.
-      /// </summary>
-      public override bool GroupSubElements()
-      {
-         return false;
-      }
-
-      /// <summary>
-      /// Processes IfcProject attributes.
-      /// </summary>
-      /// <param name="ifcProjectHandle">The IfcProject handle.</param>
-      protected override void Process(IFCAnyHandle ifcProjectHandle)
-      {
-         IFCAnyHandle unitsInContext = IFCImportHandleUtil.GetRequiredInstanceAttribute(ifcProjectHandle, "UnitsInContext", false);
-
-         if (!IFCAnyHandleUtil.IsNullOrHasNoValue(unitsInContext))
+         IfcObjectDefinition rootElement = project.RootElement();
+         IfcBuilding building = project.UppermostBuilding();
+         if(building != null)
          {
-            IList<IFCAnyHandle> units = IFCAnyHandleUtil.GetAggregateInstanceAttribute<List<IFCAnyHandle>>(unitsInContext, "Units");
-
-            if (units != null)
-            {
-               m_UnitsInContext = new HashSet<IFCUnit>();
-
-               foreach (IFCAnyHandle unit in units)
-               {
-                  IFCUnit ifcUnit = IFCImportFile.TheFile.IFCUnits.ProcessIFCProjectUnit(unit);
-                  if (!IFCUnit.IsNullOrInvalid(ifcUnit))
-                     m_UnitsInContext.Add(ifcUnit);
-               }
-            }
-            else
-            {
-               Importer.TheLog.LogMissingRequiredAttributeError(unitsInContext, "Units", false);
-            }
+            if (building.Decomposes != null) // root Element should be site hosting building
+               rootElement = building.Decomposes.RelatingObject;
          }
 
-         // We need to process the units before we process the rest of the file, since we will scale values as we go along.
-         base.Process(ifcProjectHandle);
+         bool canRemoveSitePlacement = rootElement.AddToAggregate(this, m_Cache);
+         IfcSite site = rootElement as IfcSite;
+         if (site != null)
+            site.SetHostSite(m_Cache, document, canRemoveSitePlacement);
+         
+      }
+
+      private void Initialize()
+      {
+         if (Project == null)
+            return;
+         IfcUnitAssignment unitAssignment = Project.UnitsInContext;
+         if(unitAssignment != null)
+         {
+            foreach(IfcUnit unit in unitAssignment.Units)
+            { 
+               IFCUnit ifcUnit = IFCImportFile.TheFile.IFCUnits.ProcessIFCProjectUnit(unit);
+            }
+         }
 
          // process true north - take the first valid representation context that has a true north value.
-         HashSet<IFCAnyHandle> repContexts = IFCAnyHandleUtil.GetAggregateInstanceAttribute<HashSet<IFCAnyHandle>>(ifcProjectHandle, "RepresentationContexts");
-
-         if (repContexts != null)
+         foreach(IfcGeometricRepresentationContext context in Project.RepresentationContexts.OfType<IfcGeometricRepresentationContext>())
          {
-            foreach (IFCAnyHandle geomRepContextHandle in repContexts)
+            if (m_Cache.TrueNorth == null && context.TrueNorth != null)
             {
-               if (!IFCAnyHandleUtil.IsNullOrHasNoValue(geomRepContextHandle) &&
-                   IFCAnyHandleUtil.IsSubTypeOf(geomRepContextHandle, IFCEntityType.IfcGeometricRepresentationContext))
-               {
-                  IFCRepresentationContext context = IFCRepresentationContext.ProcessIFCRepresentationContext(geomRepContextHandle);
-                  if (TrueNorthDirection == null && context.TrueNorth != null)
-                  {
-                     // TODO: Verify that we don't have inconsistent true norths.  If we do, warn.
-                     TrueNorthDirection = new UV(context.TrueNorth.X, context.TrueNorth.Y);
-                  }
+               // TODO: Verify that we don't have inconsistent true norths.  If we do, warn.
+               XYZ xyz = context.TrueNorth.ProcessNormalizedIFCDirection();
+               m_Cache.TrueNorth = new UV(xyz.X, xyz.Y);
+            }
 
-                  if (WorldCoordinateSystem == null && context.WorldCoordinateSystem != null && !context.WorldCoordinateSystem.IsIdentity)
-                  {
-                     WorldCoordinateSystem = context.WorldCoordinateSystem;
-                  }
-               }
+            if (WorldCoordinateSystem == null && context.WorldCoordinateSystem != null)
+            {
+                WorldCoordinateSystem = context.WorldCoordinateSystem.GetAxis2PlacementTransform();
             }
          }
-
-         // Special read of IfcPresentationLayerAssignment if the INVERSE flag isn't properly set in the EXPRESS file.
-         if (IFCImportFile.TheFile.SchemaVersion >= IFCSchemaVersion.IFC2x2)
-            IFCPresentationLayerAssignment.ProcessAllLayerAssignments();
       }
-
-      /// <summary>
-      /// The list of grid axes in this IFCProject, sorted by Revit name.
-      /// </summary>
-      public IDictionary<string, IFCGridAxis> GridAxes
-      {
-         get
-         {
-            if (m_GridAxes == null)
-               m_GridAxes = new Dictionary<string, IFCGridAxis>();
-            return m_GridAxes;
-         }
-      }
-
-      /// <summary>
-      /// Allow for override of IfcObjectDefinition shared parameter names.
-      /// </summary>
-      /// <param name="name">The enum corresponding of the shared parameter.</param>
-      /// <returns>The name appropriate for this IfcObjectDefinition.</returns>
-      public override string GetSharedParameterName(IFCSharedParameters name)
-      {
-         switch (name)
-         {
-            case IFCSharedParameters.IfcName:
-               return "IfcProject Name";
-            case IFCSharedParameters.IfcDescription:
-               return "IfcProject Description";
-            default:
-               return base.GetSharedParameterName(name);
-         }
-      }
-
-      /// <summary>
-      /// Get the element ids created for this entity, for summary logging.
-      /// </summary>
-      /// <param name="createdElementIds">The creation list.</param>
-      /// <remarks>May contain InvalidElementId; the caller is expected to remove it.</remarks>
-      public override void GetCreatedElementIds(ISet<ElementId> createdElementIds)
-      {
-         // If we used ProjectInformation, don't report that.
-         if (CreatedElementId != ElementId.InvalidElementId && CreatedElementId != Importer.TheCache.ProjectInformationId)
-         {
-            createdElementIds.Add(CreatedElementId);
-         }
-      }
-
       /// <summary>
       /// Creates or populates Revit elements based on the information contained in this class.
       /// </summary>
       /// <param name="doc">The document.</param>
-      protected override void Create(Document doc)
+      public void AddElements()
       {
+         Document doc = m_Cache.Document;
          Units documentUnits = new Units(doc.DisplayUnitSystem == DisplayUnit.METRIC ?
              UnitSystem.Metric : UnitSystem.Imperial);
-         foreach (IFCUnit unit in UnitsInContext)
+         foreach (IFCUnit unit in UnitsInContext.m_ProjectUnitsDictionary.Values)
          {
-            if (!IFCUnit.IsNullOrInvalid(unit))
+            if (unit != null)
             {
                try
                {
@@ -233,6 +130,8 @@ namespace Revit.IFC.Import.Data
             }
          }
          doc.SetUnits(documentUnits);
+         // Use the ProjectInfo element in the document to store its parameters.
+         Project.CreateParameters(m_Cache, Importer.TheCache.ProjectInformationId, new HashSet<string>());
 
          // We will randomize unused grid names so that they don't conflict with new entries with the same name.
          // This is only for relink.
@@ -245,39 +144,11 @@ namespace Revit.IFC.Import.Data
             // Note that new Guid() is useless - it creates a GUID of all 0s.
             grid.Name = Guid.NewGuid().ToString();
          }
-
-         base.Create(doc);
-
-         // IfcProject usually won't create an element, as it contains no geometry.
-         // If it doesn't, use the ProjectInfo element in the document to store its parameters.
-         if (CreatedElementId == ElementId.InvalidElementId)
-            CreatedElementId = Importer.TheCache.ProjectInformationId;
-      }
-
-      /// <summary>
-      /// Processes an IfcProject object.
-      /// </summary>
-      /// <param name="ifcProject">The IfcProject handle.</param>
-      /// <returns>The IFCProject object.</returns>
-      public static IFCProject ProcessIFCProject(IFCAnyHandle ifcProject)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcProject))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcProject);
-            return null;
-         }
-
-         IFCEntity project;
-         if (IFCImportFile.TheFile.EntityMap.TryGetValue(ifcProject.StepId, out project))
-            return (project as IFCProject);
-
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcProject, IFCEntityType.IfcProject))
-         {
-            return new IFCProject(ifcProject);
-         }
-
-         //LOG: ERROR: Not processed project.
-         return null;
+      
+         foreach (IfcGrid grid in Grids)
+            grid.CreateGrid(m_Cache);
+         foreach (IfcProduct element in Elements.Values)
+            element.CreateElement(m_Cache, WorldCoordinateSystem);
       }
    }
 }

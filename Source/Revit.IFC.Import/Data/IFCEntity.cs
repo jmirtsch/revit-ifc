@@ -19,6 +19,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.Linq;
 using System.Text;
 using Autodesk.Revit.DB;
@@ -28,66 +29,24 @@ using Revit.IFC.Common.Enums;
 using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
    /// <summary>
    /// Base level class for all objects created from an IFC entity.
    /// </summary>
-   public abstract class IFCEntity
+   /// 
+   public static class IFCEntity
    {
-      private int m_StepId;
 
-      private IFCEntityType m_EntityType;
-
-      /// <summary>
-      /// The id of the entity, corresponding to the STEP id of the IFC entity.
-      /// </summary>
-      public int Id
+      public static IFCEntityType GetEntityType(this BaseClassIfc baseClass)
       {
-         get { return m_StepId; }
-         protected set { m_StepId = value; }
+         IFCEntityType entityType;
+         if (Enum.TryParse<IFCEntityType>(baseClass.StepClassName, out entityType))
+            return entityType;
+         return IFCEntityType.UnKnown;
       }
-
-      /// <summary>
-      /// The entity type of the corresponding IFC entity.
-      /// </summary>
-      public IFCEntityType EntityType
-      {
-         get { return m_EntityType; }
-         protected set { m_EntityType = value; }
-      }
-
-      bool m_IsValidForCreation = true;
-
-      /// <summary>
-      /// Returns if the entity can be successfully converted into a Revit element.
-      /// This prevents repeated attempts to create an element from an invalid entity.
-      /// </summary>
-      public bool IsValidForCreation
-      {
-         get { return m_IsValidForCreation; }
-         protected set { m_IsValidForCreation = value; }
-      }
-
-      protected IFCEntity()
-      {
-      }
-
-      virtual protected void Process(IFCAnyHandle item)
-      {
-         Id = item.StepId;
-         EntityType = IFCAnyHandleUtil.GetEntityType(item);
-         IFCImportFile.TheFile.EntityMap.Add(Id, this);
-         Importer.TheLog.AddProcessedEntity(EntityType);
-      }
-
-      /// <summary>
-      /// Post-process IFCEntity attributes.
-      /// </summary>
-      virtual public void PostProcess()
-      {
-      }
-
       /// <summary>
       /// Check if two IFCEntity lists are equal.
       /// </summary>
@@ -95,7 +54,7 @@ namespace Revit.IFC.Import.Data
       /// <param name="list2">The second list.</param>
       /// <returns>True if they are equal, false otherwise.</returns>
       /// <remarks>The is not intended to be an exhaustive check.</remarks>
-      static public bool AreIFCEntityListsEquivalent<T>(IList<T> list1, IList<T> list2) where T : IFCEntity
+      static public bool AreIFCEntityListsEquivalent<T>(IList<T> list1, IList<T> list2) where T : IBaseClassIfc
       {
          int numItems = list1.Count;
          if (numItems != list2.Count)
@@ -117,18 +76,26 @@ namespace Revit.IFC.Import.Data
       /// <returns>True if they are equivalent, false if they aren't, null if not enough information.</returns>
       /// <remarks>This isn't intended to be an exhaustive check, and isn't implemented for all types.  This is intended
       /// to be used by derived classes.</remarks>
-      virtual public bool? MaybeEquivalentTo(IFCEntity otherEntity)
+      public static bool? MaybeEquivalentTo(this BaseClassIfc entity, BaseClassIfc otherEntity)
       {
          if (otherEntity == null)
             return false;
 
          // If the entities have the same Id, they are definitely the same object.  If they don't, they could
          // still be considered equivalent, so we won't disqualify them.
-         if (Id == otherEntity.Id)
+         if (entity.StepId == otherEntity.StepId)
             return true;
 
-         if (EntityType != otherEntity.EntityType)
+         if (string.Compare(entity.StepClassName, otherEntity.StepClassName, false) != 0)
             return false;
+
+         IfcPresentationLayerAssignment presentationLayerAssignment = entity as IfcPresentationLayerAssignment;
+         if (presentationLayerAssignment != null)
+            return presentationLayerAssignment.MaybeEquivalentTo(otherEntity as IfcPresentationLayerAssignment);
+
+         IfcStyledItem styledItem = entity as IfcStyledItem;
+         if (styledItem != null)
+            return styledItem.MaybeEquivalentTo(otherEntity as IfcStyledItem);
 
          return null;
       }
@@ -140,14 +107,36 @@ namespace Revit.IFC.Import.Data
       /// <returns>True if they are equivalent, false if they aren't.</returns>
       /// <remarks>This isn't intended to be an exhaustive check, and isn't implemented for all types.  This is intended
       /// to make a final decision, and will err on the side of deciding that entities aren't equivalent.</remarks>
-      virtual public bool IsEquivalentTo(IFCEntity otherEntity)
+      public static bool IsEquivalentTo(BaseClassIfc entity, BaseClassIfc otherEntity)
       {
-         bool? maybeEquivalentTo = MaybeEquivalentTo(otherEntity);
+         bool? maybeEquivalentTo = entity.MaybeEquivalentTo(otherEntity);
          if (maybeEquivalentTo.HasValue)
             return maybeEquivalentTo.Value;
 
+         
          // If we couldn't determine that they were the same, assume that they aren't.
          return false;
       }
    }
+
+   public class CreateElementIfcCache
+   {
+      internal UV TrueNorth = null;
+      internal HashSet<int> InvalidForCreation = new HashSet<int>();
+      internal Dictionary<int, ElementId> CreatedElements = new Dictionary<int, ElementId>();
+      internal Dictionary<int, ElementId> CreatedViews = new Dictionary<int, ElementId>();
+      internal Dictionary<int, IFCSimpleProfile> Profiles = new Dictionary<int, IFCSimpleProfile>();
+      internal Dictionary<int, ElementId> PresentationLayerMaterials = new Dictionary<int, ElementId>();
+      
+      //Cache for selected entity geometry including IfcSpace
+      internal Dictionary<int, IList<GeometryObject>> CachedGeometry = new Dictionary<int, IList<GeometryObject>>();
+
+      internal Document Document { get; set; } = null;
+
+      internal CreateElementIfcCache(Document document)
+      {
+         Document = document;
+      }
+   }
+   
 }

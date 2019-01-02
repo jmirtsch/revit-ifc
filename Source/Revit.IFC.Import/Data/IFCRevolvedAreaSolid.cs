@@ -29,55 +29,13 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
-   public class IFCRevolvedAreaSolid : IFCSweptAreaSolid
+   public static class IFCRevolvedAreaSolid 
    {
-      Transform m_Axis = null;
-
-      double m_Angle = 0.0;
-
-      /// <summary>
-      /// The axis of rotation for the revolved area solid in the local coordinate system.
-      /// </summary>
-      public Transform Axis
-      {
-         get { return m_Axis; }
-         protected set { m_Axis = value; }
-      }
-
-      /// <summary>
-      /// The angle of the sweep.  The sweep will go from 0 to angle in the local coordinate system.
-      /// </summary>
-      public double Angle
-      {
-         get { return m_Angle; }
-         protected set { m_Angle = value; }
-      }
-
-      protected IFCRevolvedAreaSolid()
-      {
-      }
-
-      override protected void Process(IFCAnyHandle solid)
-      {
-         base.Process(solid);
-
-         // We will not fail if the axis is not given, but instead assume it to be the identity in the LCS.
-         IFCAnyHandle axis = IFCImportHandleUtil.GetRequiredInstanceAttribute(solid, "Axis", false);
-         if (axis != null)
-            Axis = IFCLocation.ProcessIFCAxis1Placement(axis);
-         else
-            Axis = Transform.Identity;
-
-         bool found = false;
-         Angle = IFCImportHandleUtil.GetRequiredScaledAngleAttribute(solid, "Angle", out found);
-         // TODO: IFCImportFile.TheFile.Document.Application.IsValidAngle(Angle)
-         if (!found || Angle < MathUtil.Eps())
-            Importer.TheLog.LogError(solid.StepId, "revolve angle is invalid, aborting.", true);
-      }
-
-      private XYZ GetValidXVectorFromLoop(CurveLoop curveLoop, XYZ zVec, XYZ origin)
+      private static XYZ GetValidXVectorFromLoop(CurveLoop curveLoop, XYZ zVec, XYZ origin)
       {
          foreach (Curve curve in curveLoop)
          {
@@ -118,22 +76,24 @@ namespace Revit.IFC.Import.Data
       /// <param name="lcs">Local coordinate system for the geometry.</param>
       /// <param name="guid">The guid of an element for which represntation is being created.</param>
       /// <returns>One or more created Solids.</returns>
-      protected override IList<GeometryObject> CreateGeometryInternal(
+      internal static IList<GeometryObject> CreateGeometryRevolvedAreaSolid(this IfcRevolvedAreaSolid revolvedAreaSolid, CreateElementIfcCache cache,
             IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
       {
          Transform origLCS = (lcs == null) ? Transform.Identity : lcs;
-         Transform unscaledRevolvePosition = (Position == null) ? origLCS : origLCS.Multiply(Position);
+         IfcAxis2Placement3D position = revolvedAreaSolid.Position;
+         Transform unscaledRevolvePosition = position == null ? origLCS : origLCS.Multiply(position.GetPlacementTransformUnscaled());
 
          Transform scaledOrigLCS = (scaledLcs == null) ? Transform.Identity : scaledLcs;
-         Transform scaledRevolvePosition = (Position == null) ? scaledOrigLCS : scaledOrigLCS.Multiply(Position);
+         Transform scaledRevolvePosition = (position == null) ? scaledOrigLCS : scaledOrigLCS.Multiply(position.GetPlacementTransform());
 
-         ISet<IList<CurveLoop>> disjointLoops = GetTransformedCurveLoops(unscaledRevolvePosition, scaledRevolvePosition);
+         ISet<IList<CurveLoop>> disjointLoops = revolvedAreaSolid.GetTransformedCurveLoops(unscaledRevolvePosition, scaledRevolvePosition, cache);
          if (disjointLoops == null || disjointLoops.Count() == 0)
             return null;
 
-         XYZ frameOrigin = scaledRevolvePosition.OfPoint(Axis.Origin);
-         XYZ frameZVec = scaledRevolvePosition.OfVector(Axis.BasisZ);
-         SolidOptions solidOptions = new SolidOptions(GetMaterialElementId(shapeEditScope), shapeEditScope.GraphicsStyleId);
+         Transform axis = revolvedAreaSolid.Axis.GetIFCAxis1PlacementTransform();
+         XYZ frameOrigin = scaledRevolvePosition.OfPoint(axis.Origin);
+         XYZ frameZVec = scaledRevolvePosition.OfVector(axis.BasisZ);
+         SolidOptions solidOptions = new SolidOptions(revolvedAreaSolid.GetMaterialElementId(cache, shapeEditScope), shapeEditScope.GraphicsStyleId);
 
          IList<GeometryObject> myObjs = new List<GeometryObject>();
 
@@ -144,13 +104,13 @@ namespace Revit.IFC.Import.Data
             frameXVec = GetValidXVectorFromLoop(loops[0], frameZVec, frameOrigin);
             if (frameXVec == null)
             {
-               Importer.TheLog.LogError(Id, "Couldn't generate valid frame for IfcRevolvedAreaSolid.", false);
+               Importer.TheLog.LogError(revolvedAreaSolid.StepId, "Couldn't generate valid frame for IfcRevolvedAreaSolid.", false);
                return null;
             }
             XYZ frameYVec = frameZVec.CrossProduct(frameXVec);
             Frame coordinateFrame = new Frame(frameOrigin, frameXVec, frameYVec, frameZVec);
 
-            GeometryObject myObj = GeometryCreationUtilities.CreateRevolvedGeometry(coordinateFrame, loops, 0, Angle, solidOptions);
+            GeometryObject myObj = GeometryCreationUtilities.CreateRevolvedGeometry(coordinateFrame, loops, 0, IFCUnitUtil.ScaleAngle(revolvedAreaSolid.Angle), solidOptions);
             if (myObj != null)
                myObjs.Add(myObj);
          }
@@ -165,42 +125,16 @@ namespace Revit.IFC.Import.Data
       /// <param name="lcs">Local coordinate system for the geometry, without scale.</param>
       /// <param name="scaledLcs">Local coordinate system for the geometry, including scale, potentially non-uniform.</param>
       /// <param name="guid">The guid of an element for which represntation is being created.</param>
-      protected override void CreateShapeInternal(IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
+      internal static void CreateShapeRevolvedAreaSolid(this IfcRevolvedAreaSolid revolvedAreaSolid, CreateElementIfcCache cache, IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
       {
-         base.CreateShapeInternal(shapeEditScope, lcs, scaledLcs, guid);
-
-         IList<GeometryObject> revolvedGeometries = CreateGeometryInternal(shapeEditScope, lcs, scaledLcs, guid);
+         IList<GeometryObject> revolvedGeometries = revolvedAreaSolid.CreateGeometryRevolvedAreaSolid(cache, shapeEditScope, lcs, scaledLcs, guid);
          if (revolvedGeometries != null)
          {
             foreach (GeometryObject revolvedGeometry in revolvedGeometries)
             {
-               shapeEditScope.AddGeometry(IFCSolidInfo.Create(Id, revolvedGeometry));
+               shapeEditScope.Solids.Add(IFCSolidInfo.Create(revolvedAreaSolid.StepId, revolvedGeometry));
             }
          }
-      }
-
-      protected IFCRevolvedAreaSolid(IFCAnyHandle solid)
-      {
-         Process(solid);
-      }
-
-      /// <summary>
-      /// Create an IFCRevolvedAreaSolid object from a handle of type IfcRevolvedAreaSolid.
-      /// </summary>
-      /// <param name="ifcSolid">The IFC handle.</param>
-      /// <returns>The IFCRevolvedAreaSolid object.</returns>
-      public static IFCRevolvedAreaSolid ProcessIFCRevolvedAreaSolid(IFCAnyHandle ifcSolid)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcSolid))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcRevolvedAreaSolid);
-            return null;
-         }
-
-         IFCEntity solid;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcSolid.StepId, out solid))
-            solid = new IFCRevolvedAreaSolid(ifcSolid);
-         return (solid as IFCRevolvedAreaSolid);
       }
    }
 }

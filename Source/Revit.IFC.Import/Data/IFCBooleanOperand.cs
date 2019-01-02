@@ -29,26 +29,55 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
-   class IFCBooleanOperand
+   static class IFCBooleanOperand
    {
-      public static IIFCBooleanOperand ProcessIFCBooleanOperand(IFCAnyHandle ifcBooleanOperand)
+      public static IList<GeometryObject> CreateGeometryBooleanOperand(this IfcBooleanOperand booleanOperand, CreateElementIfcCache cache, IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
       {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcBooleanOperand))
+         if (booleanOperand == null)
          {
             //LOG: ERROR: IfcSolidModel is null or has no value
             return null;
          }
 
-         if (IFCAnyHandleUtil.IsSubTypeOf(ifcBooleanOperand, IFCEntityType.IfcBooleanResult))
-            return IFCBooleanResult.ProcessIFCBooleanResult(ifcBooleanOperand);
-         else if (IFCAnyHandleUtil.IsSubTypeOf(ifcBooleanOperand, IFCEntityType.IfcHalfSpaceSolid))
-            return IFCHalfSpaceSolid.ProcessIFCHalfSpaceSolid(ifcBooleanOperand);
-         else if (IFCAnyHandleUtil.IsSubTypeOf(ifcBooleanOperand, IFCEntityType.IfcSolidModel))
-            return IFCSolidModel.ProcessIFCSolidModel(ifcBooleanOperand);
+         IfcBooleanResult booleanResult = booleanOperand as IfcBooleanResult;
+         if (booleanResult != null)
+            return booleanResult.CreateGeometryBooleanResult(cache, shapeEditScope, lcs, scaledLcs, guid);
+         {
+            IfcHalfSpaceSolid halfSpaceSolid = booleanOperand as IfcHalfSpaceSolid;
+            if (halfSpaceSolid != null)
+               return halfSpaceSolid.CreateGeometryHalfSpacedSolid(cache, shapeEditScope, lcs, scaledLcs, guid);
+            else
+            {
+               IfcSolidModel solidModel = booleanOperand as IfcSolidModel;
+               if (solidModel != null)
+                  return solidModel.CreateGeometrySolidModel(cache, shapeEditScope, lcs, scaledLcs, guid);
+            }
 
-         Importer.TheLog.LogUnhandledSubTypeError(ifcBooleanOperand, "IfcBooleanOperand", true);
+            Importer.TheLog.LogUnhandledSubTypeError(booleanOperand as BaseClassIfc, "IfcBooleanOperand", true);
+            return null;
+         }
+      }
+
+      /// <summary>
+      /// In case of a Boolean operation failure, provide a recommended direction to shift the geometry in for a second attempt.
+      /// </summary>
+      /// <param name="lcs">The local transform for this entity.</param>
+      /// <returns>An XYZ representing a unit direction vector, or null if no direction is suggested.</returns>
+      /// <remarks>If the 2nd attempt fails, a third attempt will be done with a shift in the opposite direction.</remarks>
+      public static XYZ GetSuggestedShiftDirection(this IfcBooleanOperand booleanOperand, Transform lcs)
+      {
+         IfcHalfSpaceSolid halfSpaceSolid = booleanOperand as IfcHalfSpaceSolid;
+         if(halfSpaceSolid != null)
+         {
+            IfcPlane ifcPlane = halfSpaceSolid.BaseSurface as IfcPlane;
+            Plane plane = (ifcPlane != null) ? ifcPlane.Plane() : null;
+            XYZ untransformedNorm = (plane != null) ? plane.Normal : null;
+            return (lcs == null) ? untransformedNorm : lcs.OfVector(untransformedNorm);
+         }
          return null;
       }
    }

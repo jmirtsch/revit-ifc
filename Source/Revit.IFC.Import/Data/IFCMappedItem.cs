@@ -29,54 +29,12 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
-   public class IFCMappedItem : IFCRepresentationItem
+   public static class IFCMappedItem
    {
-      IFCCartesianTransformOperator m_MappingTarget = null;
-
-      IFCRepresentationMap m_MappingSource = null;
-
-      /// <summary>
-      /// The transform, potentially including mirroring and non-uniform scaling.
-      /// </summary>
-      public IFCCartesianTransformOperator MappingTarget
-      {
-         get { return m_MappingTarget; }
-         protected set { m_MappingTarget = value; }
-      }
-
-      /// <summary>
-      /// The representation map containing the shared geometry.
-      /// </summary>
-      public IFCRepresentationMap MappingSource
-      {
-         get { return m_MappingSource; }
-         protected set { m_MappingSource = value; }
-      }
-
-      protected IFCMappedItem()
-      {
-      }
-
-      override protected void Process(IFCAnyHandle item)
-      {
-         base.Process(item);
-
-         // We will not fail if the transform is not given, but instead assume it to be the identity.
-         IFCAnyHandle mappingTarget = IFCImportHandleUtil.GetRequiredInstanceAttribute(item, "MappingTarget", false);
-         if (mappingTarget != null)
-            MappingTarget = IFCCartesianTransformOperator.ProcessIFCCartesianTransformOperator(mappingTarget);
-         else
-            MappingTarget = IFCCartesianTransformOperator.ProcessIFCCartesianTransformOperator();
-
-         IFCAnyHandle mappingSource = IFCImportHandleUtil.GetRequiredInstanceAttribute(item, "MappingSource", false);
-         if (mappingSource == null)
-            return;
-
-         MappingSource = IFCRepresentationMap.ProcessIFCRepresentationMap(mappingSource);
-      }
-
       /// <summary>
       /// Create geometry for a particular representation item.
       /// </summary>
@@ -84,39 +42,47 @@ namespace Revit.IFC.Import.Data
       /// <param name="lcs">Local coordinate system for the geometry, without scale.</param>
       /// <param name="scaledLcs">Local coordinate system for the geometry, including scale, potentially non-uniform.</param>
       /// <param name="guid">The guid of an element for which represntation is being created.</param>
-      protected override void CreateShapeInternal(IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
+      internal static void CreateShapeMappedItem(this IfcMappedItem mappedItem, CreateElementIfcCache cache, IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
       {
-         base.CreateShapeInternal(shapeEditScope, lcs, scaledLcs, guid);
-
+         Transform mappingTarget = mappedItem.MappingTarget.GetTransform();
          // Check scale; if it is uniform, create an instance.  If not, create a shape directly.
          // TODO: Instead allow creation of instances based on similar scaling.
-         double scaleX = MappingTarget.Scale;
-         double scaleY = MappingTarget.ScaleY.HasValue ? MappingTarget.ScaleY.Value : scaleX;
-         double scaleZ = MappingTarget.ScaleZ.HasValue ? MappingTarget.ScaleZ.Value : scaleX;
+         double scaleX = mappingTarget.Scale;
+         double scaleY = scaleX, scaleZ = scaleX;
+         IfcCartesianTransformationOperator2DnonUniform cartesianTransformationOperator2DnonUniform = mappedItem.MappingTarget as IfcCartesianTransformationOperator2DnonUniform;
+         if (cartesianTransformationOperator2DnonUniform != null)
+            scaleY = cartesianTransformationOperator2DnonUniform.Scale2;
+         else
+         {
+            IfcCartesianTransformationOperator3DnonUniform cartesianTransformationOperator3DnonUniform = mappedItem.MappingTarget as IfcCartesianTransformationOperator3DnonUniform;
+            if(cartesianTransformationOperator3DnonUniform != null)
+            {
+               scaleY = cartesianTransformationOperator3DnonUniform.Scale2;
+               scaleZ = cartesianTransformationOperator3DnonUniform.Scale3;
+            }
+         }
          bool isUnitScale = (MathUtil.IsAlmostEqual(scaleX, 1.0) &&
              MathUtil.IsAlmostEqual(scaleY, 1.0) &&
              MathUtil.IsAlmostEqual(scaleZ, 1.0));
 
-         Transform mappingTransform = MappingTarget.Transform;
-
          Transform newLcs = null;
          if (lcs == null)
-            newLcs = mappingTransform;
-         else if (mappingTransform == null)
+            newLcs = mappingTarget;
+         else if (mappingTarget == null)
             newLcs = lcs;
          else
-            newLcs = lcs.Multiply(mappingTransform);
+            newLcs = lcs.Multiply(mappingTarget);
 
          Transform newScaledLcs = null;
          if (scaledLcs == null)
-            newScaledLcs = mappingTransform;
-         else if (mappingTransform == null)
+            newScaledLcs = mappingTarget;
+         else if (mappingTarget == null)
             newScaledLcs = scaledLcs;
          else
-            newScaledLcs = scaledLcs.Multiply(mappingTransform);
+            newScaledLcs = scaledLcs.Multiply(mappingTarget);
 
          // Pass in newLCS = null, use newLCS for instance.
-         bool isFootprint = (shapeEditScope.ContainingRepresentation.Identifier == IFCRepresentationIdentifier.FootPrint);
+         bool isFootprint = (string.Compare(shapeEditScope.ContainingRepresentation.RepresentationIdentifier, IFCRepresentationIdentifier.FootPrint.ToString(),true) == 0);
 
          bool canCreateType = !shapeEditScope.PreventInstances && 
             (newLcs != null && newLcs.IsConformal) &&
@@ -126,10 +92,10 @@ namespace Revit.IFC.Import.Data
 
          if (canCreateType)
          {
-            MappingSource.CreateShape(shapeEditScope, null, null, guid);
-            IList<GeometryObject> instances = DirectShape.CreateGeometryInstance(shapeEditScope.Document, MappingSource.Id.ToString(), newLcs);
+            mappedItem.MappingSource.CreateShapeRepresentationMap(cache, shapeEditScope, null, null, guid);
+            IList<GeometryObject> instances = DirectShape.CreateGeometryInstance(shapeEditScope.Document, mappedItem.MappingSource.StepId.ToString(), newLcs);
             foreach (GeometryObject instance in instances)
-               shapeEditScope.AddGeometry(IFCSolidInfo.Create(Id, instance));
+               shapeEditScope.Solids.Add(IFCSolidInfo.Create(mappedItem.StepId, instance));
          }
          else
          {
@@ -145,32 +111,9 @@ namespace Revit.IFC.Import.Data
                newScaledLcs = newScaledLcs.Multiply(scaleTransform);
             }
 
-            MappingSource.CreateShape(shapeEditScope, newLcs, newScaledLcs, guid);
+            mappedItem.MappingSource.CreateShapeRepresentationMap(cache, shapeEditScope, newLcs, newScaledLcs, guid);
          }
       }
 
-      protected IFCMappedItem(IFCAnyHandle item)
-      {
-         Process(item);
-      }
-
-      /// <summary>
-      /// Create an IFCMappedItem object from a handle of type IfcMappedItem.
-      /// </summary>
-      /// <param name="ifcMappedItem">The IFC handle.</param>
-      /// <returns>The IFCMappedItem object.</returns>
-      public static IFCMappedItem ProcessIFCMappedItem(IFCAnyHandle ifcMappedItem)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcMappedItem))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcMappedItem);
-            return null;
-         }
-
-         IFCEntity mappedItem;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcMappedItem.StepId, out mappedItem))
-            mappedItem = new IFCMappedItem(ifcMappedItem);
-         return (mappedItem as IFCMappedItem);
-      }
    }
-}
+} 

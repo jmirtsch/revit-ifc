@@ -32,6 +32,8 @@ using Revit.IFC.Import.Properties;
 using UnitSystem = Autodesk.Revit.DB.DisplayUnit;
 using UnitName = Autodesk.Revit.DB.DisplayUnitType;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Utility
 {
    /// <summary>
@@ -88,12 +90,12 @@ namespace Revit.IFC.Import.Utility
 
       private ISet<IFCEntityType> m_LogUnhandledSubtypeErrors = new HashSet<IFCEntityType>();
 
-      IFCRoot m_CurrentlyProcessedEntity = null;
+      IfcRoot m_CurrentlyProcessedEntity = null;
 
       /// <summary>
       /// Allows setting the currently processed entity for identity data when processing failures.
       /// </summary>
-      public IFCRoot CurrentlyProcessedEntity
+      public IfcRoot CurrentlyProcessedEntity
       {
          protected get { return m_CurrentlyProcessedEntity; }
          set { m_CurrentlyProcessedEntity = value; }
@@ -270,15 +272,15 @@ namespace Revit.IFC.Import.Utility
       /// <param name="handle">The unhandled entity handle.</param>
       /// <param name="expectedType">The expected base type of the handle.</param>
       /// <param name="throwError">throw an InvalidOperationException if true.</param>
-      public void LogUnexpectedTypeError(IFCAnyHandle handle, IFCEntityType expectedType, bool throwError)
+      public void LogUnexpectedTypeError(BaseClassIfc handle, IFCEntityType expectedType, bool throwError)
       {
-         LogError(handle.StepId, "Expected handle of type " + expectedType.ToString() + ", found: " + IFCAnyHandleUtil.GetEntityType(handle).ToString(), throwError);
+         LogError(handle.StepId, "Expected handle of type " + expectedType.ToString() + ", found: " + handle.StepClassName.ToString(), throwError);
       }
 
-      private void LogUnhandledSubTypeErrorBase(IFCAnyHandle handle, string mainTypeAsString, bool throwError)
+      private void LogUnhandledSubTypeErrorBase(IBaseClassIfc handle, string mainTypeAsString, bool throwError)
       {
-         IFCEntityType subType = IFCAnyHandleUtil.GetEntityType(handle);
-         if (!m_LogUnhandledSubtypeErrors.Contains(subType))
+         IFCEntityType subType;
+         if(Enum.TryParse<IFCEntityType>(handle.StepClassName, out subType) && !m_LogUnhandledSubtypeErrors.Contains(subType))
          {
             m_LogUnhandledSubtypeErrors.Add(subType);
             LogError(handle.StepId, "Unhandled subtype of " + mainTypeAsString + ": " + subType.ToString() + " (This message will only appear once.)", throwError);
@@ -291,7 +293,7 @@ namespace Revit.IFC.Import.Utility
       /// <param name="handle">The unhandled entity handle.</param>
       /// <param name="mainType">The base type of the handle.</param>
       /// <param name="throwError">throw an InvalidOperationException if true.</param>
-      public void LogUnhandledSubTypeError(IFCAnyHandle handle, IFCEntityType mainType, bool throwError)
+      public void LogUnhandledSubTypeError(IBaseClassIfc handle, IFCEntityType mainType, bool throwError)
       {
          LogUnhandledSubTypeErrorBase(handle, mainType.ToString(), throwError);
       }
@@ -302,7 +304,7 @@ namespace Revit.IFC.Import.Utility
       /// <param name="handle">The unhandled entity handle.</param>
       /// <param name="mainTypeAsString">The base type of the handle.</param>
       /// <param name="throwError">throw an InvalidOperationException if true.</param>
-      public void LogUnhandledSubTypeError(IFCAnyHandle handle, string mainTypeAsString, bool throwError)
+      public void LogUnhandledSubTypeError(BaseClassIfc handle, string mainTypeAsString, bool throwError)
       {
          LogUnhandledSubTypeErrorBase(handle, mainTypeAsString, throwError);
       }
@@ -312,9 +314,9 @@ namespace Revit.IFC.Import.Utility
       /// </summary>
       /// <param name="unitHnd">The unit handle.</param>
       /// <param name="unitType">The unit type as a string.</param>
-      public void LogUnhandledUnitTypeError(IFCAnyHandle unitHnd, string unitType)
+      public void LogUnhandledUnitTypeError(IfcUnit unitHnd, string unitType)
       {
-         LogError(unitHnd.StepId, "Unhandled type of IfcSIUnit: " + unitType, false);
+         LogError(unitHnd.StepId, "Unhandled type of IfcUnit: " + unitType, false);
       }
 
       /// <summary>
@@ -323,9 +325,9 @@ namespace Revit.IFC.Import.Utility
       /// <param name="handle">The unhandled entity handle.</param>
       /// <param name="name">The missing attribute name.</param>
       /// <param name="throwError">Throw an InvalidOperationException.</param>
-      public void LogMissingRequiredAttributeError(IFCAnyHandle handle, string name, bool throwError)
+      public void LogMissingRequiredAttributeError(BaseClassIfc handle, string name, bool throwError)
       {
-         LogError(handle.StepId, "required attribute " + name + " not found for " + IFCAnyHandleUtil.GetEntityType(handle).ToString(), throwError);
+         LogError(handle.StepId, "required attribute " + name + " not found for " + handle.StepClassName, throwError);
       }
 
       /// <summary>
@@ -333,9 +335,9 @@ namespace Revit.IFC.Import.Utility
       /// Used when the main Revit element could be created, but an associated element could not (example: a View for a Level).
       /// </summary>
       /// <param name="root">The IFCRoot object.</param>
-      public void LogAssociatedCreationError(IFCRoot root, Type classType)
+      public void LogAssociatedCreationError(IfcRoot root, Type classType)
       {
-         LogError(root.Id, "couldn't create associated Revit element(s) of type " + classType.ToString(), false);
+         LogError(root.StepId, "couldn't create associated Revit element(s) of type " + classType.ToString(), false);
       }
 
       /// <summary>
@@ -344,12 +346,12 @@ namespace Revit.IFC.Import.Utility
       /// <param name="entity">The IFCEntity object.</param>
       /// <param name="optionalMessage">An optional message to replace the default.</param>
       /// <param name="throwError">True if we should also throw an error.</param>
-      public void LogCreationError(IFCEntity entity, string optionalMessage, bool throwError)
+      public void LogCreationError(BaseClassIfc entity, string optionalMessage, bool throwError)
       {
          if (string.IsNullOrWhiteSpace(optionalMessage))
-            LogError(entity.Id, "couldn't create associated Revit element(s)", throwError);
+            LogError(entity.StepId, "couldn't create associated Revit element(s)", throwError);
          else
-            LogError(entity.Id, optionalMessage, throwError);
+            LogError(entity.StepId, optionalMessage, throwError);
       }
 
       /// <summary>
@@ -361,7 +363,7 @@ namespace Revit.IFC.Import.Utility
       /// just logs them.</remarks>
       public FailureProcessingResult PreprocessFailures(FailuresAccessor failuresAccessor)
       {
-         int currentlyProcessedEntityId = (CurrentlyProcessedEntity != null) ? CurrentlyProcessedEntity.Id : 0;
+         int currentlyProcessedEntityId = (CurrentlyProcessedEntity != null) ? CurrentlyProcessedEntity.StepId : 0;
          IList<FailureMessageAccessor> failList = failuresAccessor.GetFailureMessages();
          foreach (FailureMessageAccessor failure in failList)
          {
@@ -440,13 +442,13 @@ namespace Revit.IFC.Import.Utility
       /// </summary>
       /// <param name="doc">The document.</param>
       /// <param name="objDef">The created entity.</param>
-      public void AddCreatedEntity(Document doc, IFCObjectDefinition objDef)
+      public void AddCreatedEntity(CreateElementIfcCache cache, IfcObjectDefinition objDef)
       {
          if (objDef == null)
             return;
-
+         Document doc = cache.Document;
          ISet<ElementId> createdElementIds = new HashSet<ElementId>();
-         objDef.GetCreatedElementIds(createdElementIds);
+         objDef.GetCreatedElementIds(createdElementIds, cache);
 
          foreach (ElementId createdElementId in createdElementIds)
          {
@@ -556,24 +558,27 @@ namespace Revit.IFC.Import.Utility
             if (LogFileName.EndsWith(".log.html"))
             {
                string originalLogFileName = LogFileName.Substring(0, LogFileName.Length - 5);
-               try
+               if (File.Exists(originalLogFileName))
                {
-                  StreamReader originalLogFile = new StreamReader(originalLogFileName);
-                  if (originalLogFile != null)
+                  try
                   {
-                     WriteLineNoBreak("<A NAME=\"ToolkitMessage\"></A>");
-                     WriteLineNoBreak("Toolkit Log");
-                     WriteLine("");
+                     StreamReader originalLogFile = new StreamReader(originalLogFileName);
+                     if (originalLogFile != null)
+                     {
+                        WriteLineNoBreak("<A NAME=\"ToolkitMessage\"></A>");
+                        WriteLineNoBreak("Toolkit Log");
+                        WriteLine("");
 
-                     string originalLogContents = null;
-                     while ((originalLogContents = originalLogFile.ReadLine()) != null)
-                        WriteLine(originalLogContents);
-                     originalLogFile.Close();
-                     File.Delete(originalLogFileName);
+                        string originalLogContents = null;
+                        while ((originalLogContents = originalLogFile.ReadLine()) != null)
+                           WriteLine(originalLogContents);
+                        originalLogFile.Close();
+                        File.Delete(originalLogFileName);
+                     }
                   }
-               }
-               catch
-               {
+                  catch
+                  {
+                  }
                }
             }
 

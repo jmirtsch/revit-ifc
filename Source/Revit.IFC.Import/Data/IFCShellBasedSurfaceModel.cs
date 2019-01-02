@@ -29,31 +29,13 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
-   public class IFCShellBasedSurfaceModel : IFCRepresentationItem
+   public static class IFCShellBasedSurfaceModel
    {
-      // Only IfcOpenShell and IfcClosedShell will be permitted.
-      ISet<IFCConnectedFaceSet> m_Shells = null;
-
-      /// <summary>
-      /// The shells of the surface model.
-      /// </summary>
-      public ISet<IFCConnectedFaceSet> Shells
-      {
-         get
-         {
-            if (m_Shells == null)
-               m_Shells = new HashSet<IFCConnectedFaceSet>();
-            return m_Shells;
-         }
-      }
-
-      protected IFCShellBasedSurfaceModel()
-      {
-      }
-
-      private void WarnOnTooFewCreatedFaces(IList<GeometryObject> geomObjs, int numExpectedFaces)
+      private static void WarnOnTooFewCreatedFaces(this IfcShellBasedSurfaceModel shellBasedSurfaceModel, IList<GeometryObject> geomObjs, int numExpectedFaces)
       {
          if (geomObjs == null)
             return;
@@ -75,7 +57,7 @@ namespace Revit.IFC.Import.Data
          if (numCreatedFaces < numExpectedFaces)
          {
             Importer.TheLog.LogWarning
-                (Id, "Created " + numCreatedFaces + " valid faces out of " + numExpectedFaces + " total.  This may be due to slivery triangles or other similar geometric issues.", false);
+                (shellBasedSurfaceModel.StepId, "Created " + numCreatedFaces + " valid faces out of " + numExpectedFaces + " total.  This may be due to slivery triangles or other similar geometric issues.", false);
          }
       }
 
@@ -88,17 +70,18 @@ namespace Revit.IFC.Import.Data
       /// <param name="guid">The guid of an element for which represntation is being created.</param>
       /// <returns>The created geometry.</returns>
       /// <remarks>As this doesn't inherit from IfcSolidModel, this is a non-virtual CreateSolid function.</remarks>
-      protected IList<GeometryObject> CreateGeometry(
+      internal static IList<GeometryObject> CreateGeometryShellBasedSurfaceModel(this IfcShellBasedSurfaceModel shellBasedSurfaceModel, CreateElementIfcCache cache,
             IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
       {
-         if (Shells.Count == 0)
+         IList<IfcShell> shells = shellBasedSurfaceModel.SbsmBoundary;
+         if (shells.Count == 0)
             return null;
 
          IList<GeometryObject> geomObjs = null;
          int numExpectedFaces = 0;
-         foreach (IFCConnectedFaceSet faceSet in Shells)
+         foreach (IfcConnectedFaceSet faceSet in shells)
          {
-            numExpectedFaces += faceSet.Faces.Count;
+            numExpectedFaces += faceSet.CfsFaces.Count;
          }
 
          // We are going to start by trying to create a Solid, even if we are passed a shell-based model, since we can frequently
@@ -116,9 +99,9 @@ namespace Revit.IFC.Import.Data
 
                   tsBuilderScope.StartCollectingFaceSet();
 
-                  foreach (IFCConnectedFaceSet faceSet in Shells)
+                  foreach (IfcConnectedFaceSet faceSet in shells)
                   {
-                     faceSet.CreateShape(shapeEditScope, lcs, scaledLcs, guid);
+                     faceSet.CreateShapeConnectedFaceSet(cache, shapeEditScope, lcs, scaledLcs, guid, pass == 0);
                   }
 
                   // If we are on our first pass, try again.  If we are on our second pass, warn and create the best geometry we can.
@@ -127,13 +110,12 @@ namespace Revit.IFC.Import.Data
                      if (pass == 0)
                         continue;
 
-                     Importer.TheLog.LogWarning
-                         (Id, "Processing " + tsBuilderScope.CreatedFacesCount + " valid faces out of " + numExpectedFaces + " total.", false);
+                     Importer.TheLog.LogWarning (shellBasedSurfaceModel.StepId, "Processing " + tsBuilderScope.CreatedFacesCount + " valid faces out of " + numExpectedFaces + " total.", false);
                   }
 
                   geomObjs = tsBuilderScope.CreateGeometry(guid);
 
-                  WarnOnTooFewCreatedFaces(geomObjs, numExpectedFaces);
+                  shellBasedSurfaceModel.WarnOnTooFewCreatedFaces(geomObjs, numExpectedFaces);
 
                   break;
                }
@@ -145,7 +127,7 @@ namespace Revit.IFC.Import.Data
             if (numExpectedFaces != 0)
             {
                Importer.TheLog.LogError
-                   (Id, "No valid geometry found.  This may be due to slivery triangles or other similar geometric issues.", false);
+                   (shellBasedSurfaceModel.StepId, "No valid geometry found.  This may be due to slivery triangles or other similar geometric issues.", false);
                return null;
             }
          }
@@ -153,21 +135,6 @@ namespace Revit.IFC.Import.Data
          return geomObjs;
       }
 
-      override protected void Process(IFCAnyHandle ifcShellBasedSurfaceModel)
-      {
-         base.Process(ifcShellBasedSurfaceModel);
-
-         ISet<IFCAnyHandle> ifcShells = IFCAnyHandleUtil.GetAggregateInstanceAttribute<HashSet<IFCAnyHandle>>(ifcShellBasedSurfaceModel, "SbsmBoundary");
-         foreach (IFCAnyHandle ifcShell in ifcShells)
-         {
-            IFCConnectedFaceSet shell = IFCConnectedFaceSet.ProcessIFCConnectedFaceSet(ifcShell);
-            if (shell != null)
-            {
-               shell.AllowInvalidFace = true;
-               Shells.Add(shell);
-            }
-         }
-      }
 
       /// <summary>
       /// Create geometry for a particular representation item.
@@ -176,46 +143,16 @@ namespace Revit.IFC.Import.Data
       /// <param name="lcs">Local coordinate system for the geometry, without scale.</param>
       /// <param name="scaledLcs">Local coordinate system for the geometry, including scale, potentially non-uniform.</param>
       /// <param name="guid">The guid of an element for which represntation is being created.</param>
-      protected override void CreateShapeInternal(IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
+      internal static void CreateShapeShellBasedSurfaceModel(this IfcShellBasedSurfaceModel shellBasedSurfaceModel, CreateElementIfcCache cache, IFCImportShapeEditScope shapeEditScope, Transform lcs, Transform scaledLcs, string guid)
       {
-         base.CreateShapeInternal(shapeEditScope, lcs, scaledLcs, guid);
-
-         // Ignoring Inner shells for now.
-         if (Shells.Count != 0)
+         IList<GeometryObject> geometry = shellBasedSurfaceModel.CreateGeometryShellBasedSurfaceModel(cache, shapeEditScope, lcs, scaledLcs, guid);
+         if (geometry != null)
          {
-            IList<GeometryObject> createdGeometries = CreateGeometry(shapeEditScope, lcs, scaledLcs, guid);
-            if (createdGeometries != null)
+            foreach (GeometryObject geom in geometry)
             {
-               foreach (GeometryObject createdGeometry in createdGeometries)
-               {
-                  shapeEditScope.AddGeometry(IFCSolidInfo.Create(Id, createdGeometry));
-               }
+               shapeEditScope.Solids.Add(IFCSolidInfo.Create(shellBasedSurfaceModel.StepId, geom));
             }
          }
-      }
-
-      protected IFCShellBasedSurfaceModel(IFCAnyHandle item)
-      {
-         Process(item);
-      }
-
-      /// <summary>
-      /// Create an IFCShellBasedSurfaceModel object from a handle of type IfcShellBasedSurfaceModel.
-      /// </summary>
-      /// <param name="ifcShellBasedSurfaceModel">The IFC handle.</param>
-      /// <returns>The IFCShellBasedSurfaceModel object.</returns>
-      public static IFCShellBasedSurfaceModel ProcessIFCShellBasedSurfaceModel(IFCAnyHandle ifcShellBasedSurfaceModel)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcShellBasedSurfaceModel))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcShellBasedSurfaceModel);
-            return null;
-         }
-
-         IFCEntity shellBasedSurfaceModel;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcShellBasedSurfaceModel.StepId, out shellBasedSurfaceModel))
-            shellBasedSurfaceModel = new IFCShellBasedSurfaceModel(ifcShellBasedSurfaceModel);
-         return (shellBasedSurfaceModel as IFCShellBasedSurfaceModel);
       }
    }
 }

@@ -27,28 +27,35 @@ using Revit.IFC.Import.Data;
 using Revit.IFC.Common.Utility;
 using Revit.IFC.Common.Enums;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Utility
 {
    /// <summary>
    /// Utilities for IFCElement
    /// </summary>
-   public class IFCElementUtil
+   public static class IFCElementUtil
    {
       /// <summary>
       /// Gets the host of a hosted element, if any.
       /// </summary>
       /// <param name="hostedElement">The hosted element.</param>
       /// <returns>The host, or null.</returns>
-      static public IFCElement GetHost(IFCElement hostedElement)
+      static public IfcElement GetHost(this IfcElement hostedElement)
       {
          if (hostedElement == null)
             return null;
 
-         IFCFeatureElementSubtraction fillsOpening = hostedElement.FillsOpening;
-         if (fillsOpening == null)
+         IfcRelFillsElement fillsElement = hostedElement.FillsVoids.FirstOrDefault();
+         if (fillsElement == null)
             return null;
-
-         return fillsOpening.VoidsElement;
+         IfcOpeningElement openingElement = fillsElement.RelatingOpeningElement;
+         if (openingElement == null)
+            return null;
+         IfcRelVoidsElement voidsElement = openingElement.VoidsElement;
+         if (voidsElement == null)
+            return null;
+         return voidsElement.RelatingBuildingElement;
       }
 
       /// <summary>
@@ -56,27 +63,28 @@ namespace Revit.IFC.Import.Utility
       /// </summary>
       /// <param name="hostElement">The host element.</param>
       /// <returns>The hosted elements, or null.  An unfilled opening counts as a hosted element.</returns>
-      static public IList<IFCElement> GetHostedElements(IFCElement hostElement)
+      public static IList<IfcElement> GetHostedElements(this IfcElement hostElement)
       {
          if (hostElement == null)
             return null;
 
-         ICollection<IFCFeatureElementSubtraction> openings = hostElement.Openings;
+         IList<IfcFeatureElementSubtraction> openings = hostElement.HasOpenings.Select(x=>x.RelatedOpeningElement).ToList();
          if (openings == null || (openings.Count == 0))
             return null;
 
-         IList<IFCElement> hostedElements = new List<IFCElement>();
-         foreach (IFCFeatureElementSubtraction opening in openings)
+         List<IfcElement> hostedElements = new List<IfcElement>();
+         foreach (IfcFeatureElementSubtraction opening in openings)
          {
-            if (!(opening is IFCOpeningElement))
+            IfcOpeningElement openingElement = opening as IfcOpeningElement;
+            if (opening == null)
                hostedElements.Add(opening);
             else
             {
-               IFCOpeningElement openingElement = opening as IFCOpeningElement;
-               if (openingElement.FilledByElement != null)
-                  hostedElements.Add(openingElement.FilledByElement);
-               else
+               IList<IfcRelFillsElement> fillings = openingElement.HasFillings;
+               if(fillings.Count == 0)
                   hostedElements.Add(openingElement);
+               else
+                  hostedElements.AddRange(fillings.Select(x=>x.RelatedBuildingElement));
             }
          }
 
@@ -101,6 +109,14 @@ namespace Revit.IFC.Import.Utility
          return categoryId;
       }
 
+      static public DirectShape CreateElement(CreateElementIfcCache cache, ElementId categoryId, string dataGUID, IList<GeometryObject> geomObjs, int id)
+      {
+         DirectShape directShape = CreateElement(cache.Document, categoryId, dataGUID, geomObjs, id);
+         if(directShape != null)
+            cache.CreatedElements[id] = directShape.Id;
+         return directShape;
+
+      }
       /// <summary>
       /// Create a DirectShape, and set its options accordingly.
       /// </summary>
@@ -114,6 +130,8 @@ namespace Revit.IFC.Import.Utility
       {
          string appGUID = Importer.ImportAppGUID();
          DirectShape directShape = DirectShape.CreateElement(doc, GetDSValidCategoryId(doc, categoryId, id));
+         if (directShape == null)
+            return null;
          directShape.ApplicationId = appGUID;
          directShape.ApplicationDataId = dataGUID;
 
@@ -121,7 +139,7 @@ namespace Revit.IFC.Import.Utility
          // Referenceable: true.
          // Room Bounding: if applicable, user settable.
 
-         if (directShape != null && geomObjs != null)
+         if (geomObjs != null)
             directShape.SetShape(geomObjs);
 
          return directShape;

@@ -28,135 +28,38 @@ using Revit.IFC.Common.Enums;
 using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
    /// <summary>
    /// Represents an IfcPhysicalSimpleQuantity.
    /// </summary>
-   public class IFCPhysicalSimpleQuantity : IFCPhysicalQuantity
+   public static class IFCPhysicalSimpleQuantity
    {
-      /// <summary>
-      /// The base unit type, if not defined in the IFC file, based on the type of quantity.
-      /// </summary>
-      UnitType m_BaseUnitType = UnitType.UT_Undefined;
-
-      /// <summary>
-      /// The optional unit for the quantity.
-      /// </summary>
-      IFCUnit m_Unit = null;
-
-      /// <summary>
-      /// The value.
-      /// </summary>
-      IFCData m_Value;
-
-      /// <summary>
-      /// The base unit type, if not defined in the IFC file, based on the type of quantity.
-      /// </summary>
-      protected UnitType BaseUnitType
+      public static IFCUnit GetUnit(this IfcPhysicalSimpleQuantity physicalSimpleQuantity)
       {
-         get { return m_BaseUnitType; }
-         set { m_BaseUnitType = value; }
+         IfcUnit unit = physicalSimpleQuantity.Unit;
+         if (unit == null)
+            return IFCImportFile.TheFile.IFCUnits.GetIFCProjectUnit(physicalSimpleQuantity.GetUnitType());
+         return new IFCUnit(unit);
       }
-
-      /// <summary>
-      /// The associated unit.
-      /// </summary>
-      protected IFCUnit IFCUnit
+      
+      public static UnitType GetUnitType(this IfcPhysicalSimpleQuantity physicalSimpleQuantity)
       {
-         get { return m_Unit; }
-         set { m_Unit = value; }
-      }
+         if(physicalSimpleQuantity is IfcQuantityLength)
+            return UnitType.UT_Length;
+         if (physicalSimpleQuantity is IfcQuantityArea)
+            return UnitType.UT_Area;
+         if(physicalSimpleQuantity is IfcQuantityCount || physicalSimpleQuantity is IfcQuantityTime)
+            return UnitType.UT_Number;
+         if (physicalSimpleQuantity is IfcQuantityVolume)
+            return UnitType.UT_Volume;
+         if (physicalSimpleQuantity is IfcQuantityWeight)
+            return UnitType.UT_Mass;
 
-      /// <summary>
-      /// The value, in IFCUnit unit.
-      /// </summary>
-      protected IFCData Value
-      {
-         get { return m_Value; }
-         set { m_Value = value; }
-      }
-
-      protected IFCPhysicalSimpleQuantity()
-      {
-      }
-
-      protected IFCPhysicalSimpleQuantity(IFCAnyHandle ifcPhysicalSimpleQuantity)
-      {
-         Process(ifcPhysicalSimpleQuantity);
-      }
-
-      /// <summary>
-      /// Processes an IFC physical simple quantity.
-      /// </summary>
-      /// <param name="ifcPhysicalQuantity">The IfcPhysicalSimpleQuantity object.</param>
-      /// <returns>The IFCPhysicalSimpleQuantity object.</returns>
-      override protected void Process(IFCAnyHandle ifcPhysicalSimpleQuantity)
-      {
-         base.Process(ifcPhysicalSimpleQuantity);
-
-         IFCAnyHandle unit = IFCImportHandleUtil.GetOptionalInstanceAttribute(ifcPhysicalSimpleQuantity, "Unit");
-         if (!IFCAnyHandleUtil.IsNullOrHasNoValue(unit))
-            IFCUnit = IFCUnit.ProcessIFCUnit(unit);
-
-         // Process subtypes of IfcPhysicalSimpleQuantity here.
-         string attributeName = ifcPhysicalSimpleQuantity.TypeName.Substring(11) + "Value";
-         Value = ifcPhysicalSimpleQuantity.GetAttribute(attributeName);
-         BaseUnitType = IFCDataUtil.GetUnitTypeFromData(Value, UnitType.UT_Undefined);
-
-         if (BaseUnitType == UnitType.UT_Undefined)
-         {
-            // Determine it from the attributeName.
-            if (string.Compare(attributeName, "LengthValue", true) == 0)
-               BaseUnitType = UnitType.UT_Length;
-            else if (string.Compare(attributeName, "AreaValue", true) == 0)
-               BaseUnitType = UnitType.UT_Area;
-            else if (string.Compare(attributeName, "VolumeValue", true) == 0)
-               BaseUnitType = UnitType.UT_Volume;
-            else if (string.Compare(attributeName, "CountValue", true) == 0)
-               BaseUnitType = UnitType.UT_Number;
-            else if (string.Compare(attributeName, "WeightValue", true) == 0)
-               BaseUnitType = UnitType.UT_Mass;
-            else if (string.Compare(attributeName, "TimeValue", true) == 0)
-               BaseUnitType = UnitType.UT_Number;  // No time unit type in Revit.
-            else
-            {
-               Importer.TheLog.LogWarning(Id, "Can't determine unit type for IfcPhysicalSimpleQuantity of type: " + attributeName, true);
-               BaseUnitType = UnitType.UT_Number;
-            }
-         }
-
-
-         if (IFCUnit == null)
-            IFCUnit = IFCImportFile.TheFile.IFCUnits.GetIFCProjectUnit(BaseUnitType);
-      }
-
-      /// <summary>
-      /// Processes an IFC physical simple quantity.
-      /// </summary>
-      /// <param name="ifcPhysicalSimpleQuantity">The physical quantity.</param>
-      /// <returns>The IFCPhysicalSimpleQuantity object.</returns>
-      public static IFCPhysicalSimpleQuantity ProcessIFCPhysicalSimpleQuantity(IFCAnyHandle ifcPhysicalSimpleQuantity)
-      {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcPhysicalSimpleQuantity))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcPhysicalSimpleQuantity);
-            return null;
-         }
-
-         try
-         {
-            IFCEntity physicalSimpleQuantity;
-            if (IFCImportFile.TheFile.EntityMap.TryGetValue(ifcPhysicalSimpleQuantity.StepId, out physicalSimpleQuantity))
-               return (physicalSimpleQuantity as IFCPhysicalSimpleQuantity);
-
-            return new IFCPhysicalSimpleQuantity(ifcPhysicalSimpleQuantity);
-         }
-         catch (Exception ex)
-         {
-            Importer.TheLog.LogError(ifcPhysicalSimpleQuantity.StepId, ex.Message, false);
-            return null;
-         }
+         Importer.TheLog.LogWarning(physicalSimpleQuantity.StepId, "Can't determine unit type for IfcPhysicalSimpleQuantity of type: " + physicalSimpleQuantity.StepClassName, true);
+         return UnitType.UT_Undefined;
       }
 
       /// <summary>
@@ -167,12 +70,14 @@ namespace Revit.IFC.Import.Data
       /// <param name="parameterMap">The parameters of the element.  Cached for performance.</param>
       /// <param name="propertySetName">The name of the containing property set.</param>
       /// <param name="createdParameters">The names of the created parameters.</param>
-      public override void Create(Document doc, Element element, IFCParameterSetByGroup parameterGroupMap, string propertySetName, ISet<string> createdParameters)
+      public static  void Create(this IfcPhysicalSimpleQuantity physicalSimpleQuantity, Document doc, Element element, IFCParameterSetByGroup parameterGroupMap, string propertySetName, ISet<string> createdParameters)
       {
-         double doubleValueToUse = IFCUnit != null ? IFCUnit.Convert(Value.AsDouble()) : Value.AsDouble();
+
+         IFCUnit unit = physicalSimpleQuantity.GetUnit();
+         double doubleValueToUse = unit != null ? unit.Convert(physicalSimpleQuantity.MeasureValue.Measure) : physicalSimpleQuantity.MeasureValue.Measure;
 
          Parameter existingParameter = null;
-         string originalParameterName = Name + "(" + propertySetName + ")";
+         string originalParameterName = physicalSimpleQuantity.Name + "(" + propertySetName + ")";
          string parameterName = originalParameterName;
 
          if (!parameterGroupMap.TryFindParameter(parameterName, out existingParameter))
@@ -184,17 +89,13 @@ namespace Revit.IFC.Import.Data
                parameterNameCount++;
             }
             if (parameterNameCount > 2)
-               Importer.TheLog.LogWarning(Id, "Renamed parameter: " + originalParameterName + " to: " + parameterName, false);
+               Importer.TheLog.LogWarning(physicalSimpleQuantity.StepId, "Renamed parameter: " + originalParameterName + " to: " + parameterName, false);
 
             if (existingParameter == null)
             {
-               UnitType unitType = UnitType.UT_Undefined;
-               if (IFCUnit != null)
-                  unitType = IFCUnit.UnitType;
-               else
-                  unitType = IFCDataUtil.GetUnitTypeFromData(Value, UnitType.UT_Number);
+               UnitType unitType = physicalSimpleQuantity.GetUnitType();
 
-               bool created = IFCPropertySet.AddParameterDouble(doc, element, parameterName, unitType, doubleValueToUse, Id);
+               bool created = IFCPropertySet.AddParameterDouble(doc, element, parameterName, unitType, doubleValueToUse, physicalSimpleQuantity.StepId);
                if (created)
                   createdParameters.Add(parameterName);
 
@@ -217,7 +118,7 @@ namespace Revit.IFC.Import.Data
          }
 
          if (!setValue)
-            Importer.TheLog.LogError(Id, "Couldn't create parameter: " + Name + " of storage type: " + existingParameter.StorageType.ToString(), false);
+            Importer.TheLog.LogError(physicalSimpleQuantity.StepId, "Couldn't create parameter: " + physicalSimpleQuantity.Name + " of storage type: " + existingParameter.StorageType.ToString(), false);
       }
    }
 }

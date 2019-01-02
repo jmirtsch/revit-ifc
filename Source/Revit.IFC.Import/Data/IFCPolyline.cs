@@ -29,37 +29,26 @@ using Revit.IFC.Import.Enums;
 using Revit.IFC.Import.Geometry;
 using Revit.IFC.Import.Utility;
 
+using GeometryGym.Ifc;
+
 namespace Revit.IFC.Import.Data
 {
-   /// <summary>
-   /// Class that represents IFCPolyline entity
-   /// </summary>
-   public class IFCPolyline : IFCBoundedCurve
+   public static class IFCPolyline
    {
-      protected IFCPolyline()
+      public static CurveLoop PolylineCurveLoop(this IfcPolyline ifcPolyline, out IList<XYZ> pointXYZs)
       {
-      }
-
-      protected IFCPolyline(IFCAnyHandle polyline)
-      {
-         Process(polyline);
-      }
-
-      protected override void Process(IFCAnyHandle ifcCurve)
-      {
-         base.Process(ifcCurve);
-
-         IList<IFCAnyHandle> points = IFCAnyHandleUtil.GetAggregateInstanceAttribute<List<IFCAnyHandle>>(ifcCurve, "Points");
+         IList<IfcCartesianPoint> points = ifcPolyline.Points;
          int numPoints = points.Count;
          if (numPoints < 2)
          {
             string msg = "IfcPolyLine had " + numPoints + ", expected at least 2, ignoring";
-            Importer.TheLog.LogError(Id, msg, false);
-            return;
+            Importer.TheLog.LogError(ifcPolyline.StepId, msg, false);
+            pointXYZs = null;
+            return null; 
          }
 
-         IList<XYZ> pointXYZs = new List<XYZ>();
-         foreach (IFCAnyHandle point in points)
+         pointXYZs = new List<XYZ>();
+         foreach (IfcCartesianPoint point in points)
          {
             XYZ pointXYZ = IFCPoint.ProcessScaledLengthIFCCartesianPoint(point);
             pointXYZs.Add(pointXYZ);
@@ -67,31 +56,18 @@ namespace Revit.IFC.Import.Data
 
          if (pointXYZs.Count != numPoints)
          {
-            Importer.TheLog.LogError(Id, "Some of the IFC points cannot be converted to Revit points", true);
+            Importer.TheLog.LogError(ifcPolyline.StepId, "Some of the IFC points cannot be converted to Revit points", true);
          }
 
-         CurveLoop = IFCGeometryUtil.CreatePolyCurveLoop(pointXYZs, points, Id, false);
-         Curve = IFCGeometryUtil.CreateCurveFromPolyCurveLoop(CurveLoop, pointXYZs);
+         return IFCGeometryUtil.CreatePolyCurveLoop(pointXYZs, points, ifcPolyline.StepId, false);
       }
-
-      /// <summary>
-      /// Create an IFCPolyline object from a handle of type IfcPolyline
-      /// </summary>
-      /// <param name="ifcPolyline">The IFC handle</param>
-      /// <returns>The IFCPolyline object</returns>
-      public static IFCPolyline ProcessIFCPolyline(IFCAnyHandle ifcPolyline)
+      public static Curve PolylineCurve(this IfcPolyline ifcPolyline)
       {
-         if (IFCAnyHandleUtil.IsNullOrHasNoValue(ifcPolyline))
-         {
-            Importer.TheLog.LogNullError(IFCEntityType.IfcPolyline);
+         IList<XYZ> pointXYZs = new List<XYZ>();
+         CurveLoop curveLoop = ifcPolyline.PolylineCurveLoop(out pointXYZs);
+         if (curveLoop == null)
             return null;
-         }
-
-         IFCEntity polyline = null;
-         if (!IFCImportFile.TheFile.EntityMap.TryGetValue(ifcPolyline.StepId, out polyline))
-            polyline = new IFCPolyline(ifcPolyline);
-
-         return (polyline as IFCPolyline);
+         return IFCGeometryUtil.CreateCurveFromPolyCurveLoop(curveLoop, pointXYZs);
       }
    }
 }
