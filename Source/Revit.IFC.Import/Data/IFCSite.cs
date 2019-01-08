@@ -100,7 +100,7 @@ namespace Revit.IFC.Import.Data
                }
             }
 
-            XYZ projectLoc = site.Placement.TotalTransform().OfPoint(XYZ.Zero);
+            XYZ projectLoc = site.ObjectPlacement.TotalTransform().OfPoint(XYZ.Zero);
             if (!MathUtil.IsAlmostZero(projectLoc.Z))
                Importer.TheLog.LogError(site.StepId, "The Z-value of the IfcSite object placement relative transform should be 0.  This will be ignored in favor of the RefElevation value.", false);
 

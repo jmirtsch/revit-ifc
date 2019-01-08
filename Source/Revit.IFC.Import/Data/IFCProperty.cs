@@ -203,7 +203,7 @@ namespace Revit.IFC.Import.Data
                         if (unit == null)
                            doubleValueToUse = Convert.ToDouble(propertyValueToUse.Value);
                         else
-                           doubleValueToUse = Convert.ToDouble(propertyValueToUse) * unit.ScaleFactor;
+                           doubleValueToUse = Convert.ToDouble(propertyValueToUse.Value) * unit.ScaleFactor;
                      }
                      else
                      {

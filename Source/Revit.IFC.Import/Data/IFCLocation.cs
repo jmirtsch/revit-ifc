@@ -189,7 +189,7 @@ namespace Revit.IFC.Import.Data
       {
          if (site == null)
             return;
-         IfcLocalPlacement localPlacement = site.Placement as IfcLocalPlacement;
+         IfcLocalPlacement localPlacement = site.ObjectPlacement as IfcLocalPlacement;
          if (localPlacement == null)
             return;
 

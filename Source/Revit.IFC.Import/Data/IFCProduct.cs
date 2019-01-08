@@ -45,7 +45,7 @@ namespace Revit.IFC.Import.Data
       /// </summary>
       public static Transform ObjectTransform(this IfcProduct product)
       {
-         IfcObjectPlacement placement = product.Placement;
+         IfcObjectPlacement placement = product.ObjectPlacement;
          if (placement == null)
             return Transform.Identity;
          return placement.TotalTransform();

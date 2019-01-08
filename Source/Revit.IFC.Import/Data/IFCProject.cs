@@ -72,7 +72,6 @@ namespace Revit.IFC.Import.Data
          IfcSite site = rootElement as IfcSite;
          if (site != null)
             site.SetHostSite(m_Cache, document, canRemoveSitePlacement);
-         
       }
 
       private void Initialize()

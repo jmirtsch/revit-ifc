@@ -362,7 +362,7 @@ namespace Revit.IFC.Import.Data
 
          IfcLocalPlacement localPlacement = null;
          if (product != null)
-            localPlacement = product.Placement as IfcLocalPlacement;
+            localPlacement = product.ObjectPlacement as IfcLocalPlacement;
          bool canRemoveSitePlacement = true;
          foreach (IfcObjectDefinition subObject in objectDefinition.IsDecomposedBy.SelectMany(x => x.RelatedObjects))
          {
@@ -373,7 +373,7 @@ namespace Revit.IFC.Import.Data
                   IfcProduct subProduct = subObject as IfcProduct;
                   if (subProduct != null)
                   {
-                     IfcLocalPlacement subPlacement = subProduct.Placement as IfcLocalPlacement;
+                     IfcLocalPlacement subPlacement = subProduct.ObjectPlacement as IfcLocalPlacement;
                      if (subPlacement != null && subPlacement.PlacementRelTo != localPlacement)
                         canRemoveSitePlacement = false;
                   }
@@ -387,7 +387,7 @@ namespace Revit.IFC.Import.Data
             {
                if (localPlacement != null)
                {
-                  IfcLocalPlacement subPlacement = subObject.Placement as IfcLocalPlacement;
+                  IfcLocalPlacement subPlacement = subObject.ObjectPlacement as IfcLocalPlacement;
                   if (subPlacement != null && subPlacement.PlacementRelTo != localPlacement)
                      canRemoveSitePlacement = false;
                }
