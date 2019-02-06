@@ -889,6 +889,15 @@ namespace BIM.IFC.Export.UI.Properties {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to IFC4 for General Use.
+        /// </summary>
+        public static string IFC4 {
+            get {
+                return ResourceManager.GetString("IFC4", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to IFC4 Design Transfer View.
         /// </summary>
         public static string IFC4DTV {

@@ -77,6 +77,7 @@ namespace Revit.IFC.Export.Utility
       /// </summary>
       static ClassificationLocationCache m_ClassificationLocationCache;
 
+      static ClassificationReferenceCache m_ClassificationReferenceCache;
       /// <summary>
       /// The ContainmentCache object.
       /// </summary>
@@ -106,6 +107,11 @@ namespace Revit.IFC.Export.Utility
       /// The ElementToHandleCache cache.
       /// </summary>
       static ElementToHandleCache m_ElementToHandleCache;
+
+      /// <summary>
+      /// The ElementTypeToHandleCache cache
+      /// </summary>
+      static ElementTypeToHandleCache m_ElementTypeToHandleCache;
 
       ///<summary>
       /// The ExportOptions cache.
@@ -373,10 +379,10 @@ namespace Revit.IFC.Export.Utility
       /// </summary>
       static IDictionary<ElementId, int> m_HostObjectsLevelIndex;
 
-      /// <summary>
-      /// The ElementToTypeCache cache that maps Revit element type id to the IFC element type handle.
-      /// </summary>
-      static ElementToHandleCache m_ElementTypeToHandleCache;
+      ///// <summary>
+      ///// The ElementToTypeCache cache that maps Revit element type id to the IFC element type handle.
+      ///// </summary>
+      //static ElementToHandleCache m_ElementTypeToHandleCache;
 
       /// <summary>
       /// Keeps relationship of Ceiling to the Space(s) where it belongs to. Used to determine Space containment for Ceiling object that is fully contained in Space (for FMHandOverView)
@@ -397,6 +403,11 @@ namespace Revit.IFC.Export.Utility
       /// The PropertyMapCache
       /// </summary>
       static IDictionary<Tuple<string, string>, string> m_PropertyMapCache;
+
+      /// <summary>
+      /// The CertifiedEntitiesAndPsetCache
+      /// </summary>
+      static IFCCertifiedEntitiesAndPSets m_CertifiedEntitiesAndPsetCache;
 
       /// <summary>
       /// The ParameterCache object.
@@ -548,10 +559,10 @@ namespace Revit.IFC.Export.Utility
          }
       }
 
-/// <summary>
-/// The ParameterCache object.
-/// </summary>
-public static ParameterCache ParameterCache
+      /// <summary>
+      /// The ParameterCache object.
+      /// </summary>
+      public static ParameterCache ParameterCache
       {
          get
          {
@@ -997,12 +1008,12 @@ public static ParameterCache ParameterCache
       /// <summary>
       /// The ElementTypeToHandleCache object, used to cache Revit element type ids to IFC entity handles.
       /// </summary>
-      public static ElementToHandleCache ElementTypeToHandleCache
+      public static ElementTypeToHandleCache ElementTypeToHandleCache
       {
          get
          {
             if (m_ElementTypeToHandleCache == null)
-               m_ElementTypeToHandleCache = new ElementToHandleCache();
+               m_ElementTypeToHandleCache = new ElementTypeToHandleCache();
             return m_ElementTypeToHandleCache;
          }
       }
@@ -1053,6 +1064,17 @@ public static ParameterCache ParameterCache
             return m_ClassificationLocationCache;
          }
          set { m_ClassificationLocationCache = value; }
+      }
+
+      public static ClassificationReferenceCache ClassificationReferenceCache
+      {
+         get
+         {
+            if (m_ClassificationReferenceCache == null)
+               m_ClassificationReferenceCache = new ClassificationReferenceCache();
+            return m_ClassificationReferenceCache;
+         }
+         set { m_ClassificationReferenceCache = value; }
       }
 
       /// <summary>
@@ -1279,6 +1301,20 @@ public static ParameterCache ParameterCache
       }
 
       /// <summary>
+      /// The CertifiedEntitiesAndPsetCache
+      /// </summary>
+      public static IFCCertifiedEntitiesAndPSets CertifiedEntitiesAndPsetsCache
+      {
+         get
+         {
+            if (m_CertifiedEntitiesAndPsetCache == null)
+               m_CertifiedEntitiesAndPsetCache = new IFCCertifiedEntitiesAndPSets();
+
+            return m_CertifiedEntitiesAndPsetCache;
+         }
+      }
+
+      /// <summary>
       /// Clear all caches contained in this manager.
       /// </summary>
       public static void Clear()
@@ -1297,6 +1333,7 @@ public static ParameterCache ParameterCache
          m_CeilingSpaceRelCache = null;
          m_ClassificationCache = null;
          m_ClassificationLocationCache = null;
+         m_ClassificationReferenceCache = null;
          m_ConditionalPropertySetsForTypeCache = null;
          m_ContainmentCache = null;
          m_CurveAnnotationCache = null;
@@ -1354,6 +1391,7 @@ public static ParameterCache ParameterCache
          m_ZoneCache = null;
          m_ZoneInfoCache = null;
          BuildingHandle = null;
+         m_CertifiedEntitiesAndPsetCache = null;
       }
    }
 }

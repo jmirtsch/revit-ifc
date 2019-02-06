@@ -158,7 +158,7 @@ namespace Revit.IFC.Export.Utility
 
          Parameter parameter = GetParameterFromName(element.Id, null, propertyName);
 
-         if (parameter != null && parameter.HasValue && parameter.StorageType == StorageType.Integer)
+         if (parameter != null && parameter.HasValue)
          {
             switch (parameter.StorageType)
             {
@@ -359,13 +359,6 @@ namespace Revit.IFC.Export.Utility
          if (builtInParameter == BuiltInParameter.INVALID)
             throw new ArgumentException("BuiltInParameter is INVALID", "builtInParameter");
 
-         Parameter parameter = element.get_Parameter(builtInParameter);
-         if (parameter != null && parameter.HasValue && parameter.StorageType == StorageType.String)
-         {
-            parameter.SetValueString(propertyValue);
-            return;
-         }
-
          ElementId parameterId = new ElementId(builtInParameter);
          ExporterIFCUtils.AddValueString(element, parameterId, propertyValue);
       }
@@ -479,9 +472,13 @@ namespace Revit.IFC.Export.Utility
 
          Element elemType = document.GetElement(typeId);
          if (elemType != null)
-            return GetDoubleValueFromElement(elemType, null, propertyName, out propertyValue);
+         {
+            parameter = GetDoubleValueFromElement(elemType, null, propertyName, out propertyValue);
+            if (parameter == null)
+               parameter = GetDoubleValueFromElement(elemType, null, propertyName + "[Type]", out propertyValue);
+         }
 
-         return null;
+         return parameter;
       }
 
       /// <summary>
@@ -551,6 +548,27 @@ namespace Revit.IFC.Export.Utility
             return GetElementIdValueFromElement(elemType, builtInParameter, out propertyValue);
 
          return null;
+      }
+
+      /// <summary>
+      /// Return a list of material ids from element's parameters
+      /// </summary>
+      /// <param name="element">the element</param>
+      /// <returns>list of material ids</returns>
+      public static IList<ElementId> FindMaterialParameters(Element element)
+      {
+         IList<ElementId> materialIds = new List<ElementId>();
+
+         foreach (Parameter param in element.Parameters)
+         {
+            // Limit to the parameter(s) within builtin parameter group PG_MATERIALS
+            if (param.Definition.ParameterType == ParameterType.Material && param.Definition.ParameterGroup == BuiltInParameterGroup.PG_MATERIALS)
+            {
+               materialIds.Add(param.AsElementId());
+            }
+         }
+
+         return materialIds;
       }
 
       /// <summary>
@@ -843,8 +861,13 @@ namespace Revit.IFC.Export.Utility
 
          Element elementType = element.Document.GetElement(element.GetTypeId());
          if (elementType != null)
-            return GetStringValueFromElementBase(elementType, propertyName, allowUnset, out propertyValue);
-
+         {
+            parameter = GetStringValueFromElementBase(elementType, propertyName, allowUnset, out propertyValue);
+            if (parameter == null)
+            {
+               parameter = GetStringValueFromElementBase(elementType, propertyName + "[Type]", allowUnset, out propertyValue);
+            }
+         }
          return parameter;
       }
 
@@ -894,9 +917,13 @@ namespace Revit.IFC.Export.Utility
 
          Element elemType = document.GetElement(typeId);
          if (elemType != null)
-            return GetIntValueFromElement(elemType, propertyName, out propertyValue);
+         {
+            parameter = GetIntValueFromElement(elemType, propertyName, out propertyValue);
+            if (parameter == null)
+               parameter = GetIntValueFromElement(elemType, propertyName + "[Type]", out propertyValue);
+         }
 
-         return null;
+         return parameter;
       }
 
       /// <summary>
@@ -904,7 +931,7 @@ namespace Revit.IFC.Export.Utility
       /// </summary>
       /// <param name="the familySymbol"></param>
       /// <returns>maximum Offset value if there are more than one parameters of the same name</returns>
-      public static double getSpecialOffsetParameter(FamilySymbol familySymbol)
+      public static double GetSpecialOffsetParameter(FamilySymbol familySymbol)
       {
          // This method is isolated here so that it can adopt localized parameter name as necessary
 
@@ -922,7 +949,12 @@ namespace Revit.IFC.Export.Utility
          return maxOffset;
       }
 
-      public static double getSpecialThicknessParameter(FamilySymbol familySymbol)
+      /// <summary>
+      /// This method returns a special parameter for Material Thickness found in the FamilySymbol that influence the CurtainWall Panel thickness.
+      /// </summary>
+      /// <param name="familySymbol">the familySymbol</param>
+      /// <returns>thickness</returns>
+      public static double GetSpecialThicknessParameter(FamilySymbol familySymbol)
       {
          // This method is isolated here so that it can adopt localized parameter name as necessary
 
@@ -941,5 +973,55 @@ namespace Revit.IFC.Export.Utility
          return thickestValue;
       }
 
+      /// <summary>
+      /// Get override containment value through a parameter "IfcSpatialContainer" or "OverrideElementContainer". Value can be "IFCSITE", "IFCBUILDING", or the appropriate Level name
+      /// </summary>
+      /// <param name="element">the element</param>
+      /// <param name="overrideContainerHnd">the override container Handle</param>
+      /// <returns>true if there is override</returns>
+      public static ElementId OverrideContainmentParameter(ExporterIFC exporterIFC, Element element, out IFCAnyHandle overrideContainerHnd)
+      {
+         ElementId containerElemId = ElementId.InvalidElementId;
+         // Special case whether an object should be assigned to the Site or Building container
+         overrideContainerHnd = null;
+         string containerOverrideName = null;
+         if (ParameterUtil.GetStringValueFromElement(element, "OverrideElementContainer", out containerOverrideName) == null)
+            ParameterUtil.GetStringValueFromElement(element, "IfcSpatialContainer", out containerOverrideName);
+         if (!string.IsNullOrEmpty(containerOverrideName))
+         {
+            if (containerOverrideName.Equals("IFCSITE", StringComparison.CurrentCultureIgnoreCase))
+            {
+               overrideContainerHnd = ExporterCacheManager.SiteHandle;
+               return containerElemId;
+            }
+            else if (containerOverrideName.Equals("IFCBUILDING", StringComparison.CurrentCultureIgnoreCase))
+            {
+               overrideContainerHnd = ExporterCacheManager.BuildingHandle;
+               return containerElemId;
+            }
+
+            // Find Level that is designated as the override by iterating through all the Levels for the name match
+            FilteredElementCollector collector = new FilteredElementCollector(element.Document);
+            ICollection<Element> collection = collector.OfClass(typeof(Level)).ToElements();
+            foreach (Element level in collection)
+            {
+               if (level.Name.Equals(containerOverrideName, StringComparison.CurrentCultureIgnoreCase))
+               {
+                  containerElemId = level.Id;
+                  break;
+               }
+            }
+            if (containerElemId != ElementId.InvalidElementId)
+            {
+               IFCLevelInfo levelInfo = ExporterCacheManager.LevelInfoCache.GetLevelInfo(exporterIFC, containerElemId);
+               if (levelInfo != null)
+                  overrideContainerHnd = levelInfo.GetBuildingStorey();
+               if (overrideContainerHnd != null)
+                  return containerElemId;
+            }
+         }
+
+         return containerElemId;
+      }
    }
 }

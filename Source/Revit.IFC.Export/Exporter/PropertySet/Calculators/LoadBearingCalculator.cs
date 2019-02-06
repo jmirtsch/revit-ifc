@@ -78,8 +78,12 @@ namespace Revit.IFC.Export.Exporter.PropertySet.Calculators
             return true;
          }
 
-         // This may be set for Column
-         if (CategoryUtil.GetSafeCategoryId(element) == new ElementId(BuiltInCategory.OST_StructuralColumns))
+         // This may be set for Column, Beam, Brace
+         ElementId catId = CategoryUtil.GetSafeCategoryId(element);
+         if (catId == new ElementId(BuiltInCategory.OST_StructuralColumns)
+            || catId == new ElementId(BuiltInCategory.OST_StructuralFraming)
+            || catId == new ElementId(BuiltInCategory.OST_StructuralFramingSystem)
+            || catId == new ElementId(BuiltInCategory.OST_StructuralTruss))
          {
             m_LoadBearing = true;
             return true;
@@ -95,9 +99,8 @@ namespace Revit.IFC.Export.Exporter.PropertySet.Calculators
 
          // If other entities, look for the parameter value for Load Bearing
          int intLoadBearing = 0;
-         if (ParameterUtil.GetIntValueFromElementOrSymbol(element, "IfcLoadBearing", out intLoadBearing) == null)
-            if (ParameterUtil.GetIntValueFromElementOrSymbol(element, "LoadBearing", out intLoadBearing) == null)
-               return false;
+         if (ParameterUtil.GetIntValueFromElementOrSymbol(element, "LoadBearing", out intLoadBearing) == null)
+            return false;
 
          m_LoadBearing = (intLoadBearing != 0);
          return true;

@@ -199,7 +199,11 @@ namespace Revit.IFC.Export.Exporter
          hostElement = FindRootParent(part, part.OriginalCategoryId);
 
          // If part's level is not associated, try to get the host's level with the same category.
-         if (hostElement != null)
+         if (part.LevelId != null && part.LevelId != ElementId.InvalidElementId)
+         {
+            overrideLevelId = part.LevelId;
+         }
+         else if (hostElement != null)
          {
             overrideLevelId = hostElement.LevelId;
          }
@@ -317,7 +321,12 @@ namespace Revit.IFC.Export.Exporter
                if (standaloneExport)
                {
                   Transform orientationTrf = Transform.Identity;
-                  standalonePlacementSetter = PlacementSetter.Create(exporterIFC, partElement, null, orientationTrf, partExportLevelId);
+                  IFCAnyHandle overrideContainerHnd = null;
+                  ElementId overrideContainerId = ParameterUtil.OverrideContainmentParameter(exporterIFC, partElement, out overrideContainerHnd);
+                  if (overrideContainerId != ElementId.InvalidElementId && (partExportLevelId == null || partExportLevelId == ElementId.InvalidElementId))
+                     partExportLevelId = overrideContainerId;
+
+                  standalonePlacementSetter = PlacementSetter.Create(exporterIFC, partElement, null, orientationTrf, partExportLevelId, overrideContainerHnd);
                   partPlacement = standalonePlacementSetter.LocalPlacement;
                }
                else
@@ -345,8 +354,16 @@ namespace Revit.IFC.Export.Exporter
                   extrusionCreationData.ReuseLocalPlacement = false;
                   extrusionCreationData.PossibleExtrusionAxes = ifcExtrusionAxes;
 
-                  IList<Solid> solids = solidMeshInfo.GetSolids();
-                  IList<Mesh> meshes = solidMeshInfo.GetMeshes();
+                  IList<Solid> solids = new List<Solid>(); ;
+                  IList<Mesh> meshes = new List<Mesh>();
+                  IList<GeometryObject> gObjs = FamilyExporterUtil.RemoveInvisibleSolidsAndMeshes(partElement.Document, exporterIFC, solidMeshInfo.GetSolids(), solidMeshInfo.GetMeshes());
+                  foreach (GeometryObject gObj in gObjs)
+                  {
+                     if (gObj is Solid)
+                        solids.Add(gObj as Solid);
+                     else if (gObj is Mesh)
+                        meshes.Add(gObj as Mesh);
+                  }
 
                   ElementId catId = CategoryUtil.GetSafeCategoryId(partElement);
                   ElementId hostCatId = CategoryUtil.GetSafeCategoryId(hostElement);
@@ -440,7 +457,7 @@ namespace Revit.IFC.Export.Exporter
                            break;
                         default:
                            ifcPart = IFCInstanceExporter.CreateBuildingElementProxy(exporterIFC, partElement, partGUID, ownerHistory,
-                               extrusionCreationData.GetLocalPlacement(), prodRep, null);
+                               extrusionCreationData.GetLocalPlacement(), prodRep, exportType.ValidatedPredefinedType);
                            break;
                      }
                   }

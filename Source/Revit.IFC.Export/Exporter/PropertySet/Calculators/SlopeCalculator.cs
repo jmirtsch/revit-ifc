@@ -101,8 +101,7 @@ namespace Revit.IFC.Export.Exporter.PropertySet.Calculators
          }
 
          // For other elements with ExtrusionData. Parameter will take precedence (override)
-         if (ParameterUtil.GetDoubleValueFromElementOrSymbol(element, "IfcSlope", out m_Slope) == null)
-            ParameterUtil.GetDoubleValueFromElementOrSymbol(element, "Slope", out m_Slope);
+         ParameterUtil.GetDoubleValueFromElementOrSymbol(element, "Slope", out m_Slope);
          m_Slope = UnitUtil.ScaleAngle(m_Slope);
          if (m_Slope > MathUtil.Eps())
             return true;
@@ -110,6 +109,26 @@ namespace Revit.IFC.Export.Exporter.PropertySet.Calculators
          if (extrusionCreationData != null)
          {
             m_Slope = extrusionCreationData.Slope;
+            return true;
+         }
+
+         // The last attempt to compute the slope angle is to get the slope of the largest top facing face of the geometry
+         GeometryElement geomElem = element.get_Geometry(GeometryUtil.GetIFCExportGeometryOptions());
+         Face largestTopFace = null;
+
+         if (geomElem == null)
+            return false;
+
+         foreach (GeometryObject geomObj in geomElem)
+         {
+            largestTopFace = GeometryUtil.GetLargestFaceInSolid(geomObj, new XYZ(0,0,1));
+         }
+
+         if (largestTopFace != null)
+         {
+            XYZ faceNormal = largestTopFace.ComputeNormal(new UV());
+            XYZ faceNormalProjXYPlane = new XYZ(faceNormal.X, faceNormal.Y, 0.0).Normalize();
+            m_Slope = GeometryUtil.GetAngleOfFace(largestTopFace, faceNormalProjXYPlane);
             return true;
          }
 
