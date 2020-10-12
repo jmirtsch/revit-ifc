@@ -63,6 +63,12 @@ namespace Revit.IFC.Export.Exporter.PropertySet
       BuiltInParameter m_RevitBuiltInParameter = BuiltInParameter.INVALID;
 
       /// <summary>
+      /// Shared parameter definition
+      /// </summary>
+      Definition m_ParameterDefinition = null;
+
+
+      /// <summary>
       /// The property calculator to calculate the property value.
       /// </summary>
       PropertyCalculator m_PropertyCalculator;
@@ -175,6 +181,18 @@ namespace Revit.IFC.Export.Exporter.PropertySet
          set
          {
             m_RevitBuiltInParameter = value;
+         }
+      }
+
+      public Definition ParameterDefinition
+      {
+         get
+         {
+            return m_ParameterDefinition;
+         }
+         set
+         {
+           m_ParameterDefinition = value;
          }
       }
 

@@ -79,7 +79,20 @@ namespace Revit.IFC.Export.Utility
          ElementId elementId = element.Id;
 
          Parameter parameter = GetParameterFromName(elementId, null, propertyName);
+         return GetStringValueFromParameter(element, propertyName, parameter, allowUnset, out propertyValue); 
+      }
+      private static Parameter GetStringValueFromElementBase(Element element, Definition parameterDefinition, bool allowUnset, out string propertyValue)
+      {
+         propertyValue = string.Empty;
+         if (element == null)
+            return null;
 
+         Parameter parameter = element.get_Parameter(parameterDefinition);
+         return GetStringValueFromParameter(element, parameterDefinition.Name, parameter, allowUnset, out propertyValue); 
+      }
+      private static Parameter GetStringValueFromParameter(Element element, string propertyName, Parameter parameter, bool allowUnset, out string propertyValue)
+      { 
+         propertyValue = string.Empty;
          if (parameter != null)
          {
             StorageType storageType = parameter.StorageType;
@@ -131,6 +144,10 @@ namespace Revit.IFC.Export.Utility
          return GetStringValueFromElementBase(element, propertyName, false, out propertyValue);
       }
 
+      public static Parameter GetStringValueFromElement(Element element, Definition paramterDefinition, out string propertyValue)
+      {
+         return GetStringValueFromElementBase(element, paramterDefinition, false, out propertyValue);
+      }
       /// <summary>
       /// Gets integer value from parameter of an element.
       /// </summary>
@@ -151,6 +168,23 @@ namespace Revit.IFC.Export.Utility
             return null;
 
          Parameter parameter = GetParameterFromName(element.Id, null, propertyName);
+         return GetIntValueFromParameter(element, propertyName, parameter, out propertyValue);
+      }
+      
+      public static Parameter GetIntValueFromElement(Element element, Definition parameterDefinition, out int propertyValue)
+      {
+         propertyValue = 0;
+
+         if (element == null)
+            return null;
+
+         Parameter parameter = element.get_Parameter(parameterDefinition);
+         return GetIntValueFromParameter(element, parameterDefinition.Name, parameter, out propertyValue);
+      }
+      
+      private static Parameter GetIntValueFromParameter(Element element, string propertyName, Parameter parameter, out int propertyValue)
+      {
+         propertyValue = 0;
          if (parameter != null && parameter.HasValue)
          {
             switch (parameter.StorageType)
@@ -197,6 +231,12 @@ namespace Revit.IFC.Export.Utility
          return GetDoubleValueFromElement(element, group, propertyName, out propertyValue, out unitType);
       }
 
+      public static Parameter GetDoubleValueFromElement(Element element, Definition parameterDefinition, out double propertyValue)
+      {
+         ForgeTypeId unitType;
+         return GetDoubleValueFromElement(element, parameterDefinition, out propertyValue, out unitType);
+      }
+
       /// <summary>
       /// Gets double value from parameter of an element.
       /// </summary>
@@ -219,6 +259,13 @@ namespace Revit.IFC.Export.Utility
             return null;
 
          Parameter parameter = GetParameterFromName(element.Id, group, propertyName);
+         return GetDoubleValueFromParameter(element, propertyName, parameter, out propertyValue, out unitType);
+      }
+
+      private static Parameter GetDoubleValueFromParameter(Element element, string propertyName, Parameter parameter, out double propertyValue, out ForgeTypeId unitType)
+      { 
+         propertyValue = 0.0;
+         unitType = null;
          if (parameter != null && parameter.HasValue)
          {
             switch (parameter.StorageType)
@@ -250,6 +297,17 @@ namespace Revit.IFC.Export.Utility
          return null;
       }
 
+      public static Parameter GetDoubleValueFromElement(Element element, Definition parameterDefinition, out double propertyValue, out ForgeTypeId unitType)
+      {
+         propertyValue = 0.0;
+         unitType = null;
+
+         if (parameterDefinition == null)
+            return null;
+
+         Parameter parameter = element.get_Parameter(parameterDefinition);
+         return GetDoubleValueFromParameter(element, parameterDefinition.Name, parameter, out propertyValue, out unitType);
+      }
       /// <summary>
       /// Gets string value from built-in parameter of an element.
       /// </summary>

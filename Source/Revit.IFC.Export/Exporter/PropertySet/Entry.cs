@@ -155,5 +155,13 @@ namespace Revit.IFC.Export.Exporter.PropertySet
             m_Entries[0].RevitBuiltInParameter = builtInParameter;
       }
 
+      public void SetRevitParameterDefinition(Definition parameterDefinition)
+      {
+         if (m_Entries.Count == 0)
+            m_Entries.Add(new T() { ParameterDefinition = parameterDefinition });
+         else
+            m_Entries[0].ParameterDefinition = parameterDefinition;
+      }
+
    }
 }

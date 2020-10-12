@@ -542,6 +542,7 @@ namespace Revit.IFC.Export.Exporter
                   continue;
 
                PropertySetEntry ifcPSE = PropertySetEntry.CreateParameterEntry(containedElementParameter, builtInParameterId);
+               ifcPSE.SetRevitParameterDefinition(containedElementParameter.Definition);
                ifcPSE.PropertyName = field.ColumnHeading;
                customPSet.AddEntry(ifcPSE);
             }
